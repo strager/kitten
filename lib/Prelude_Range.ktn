@@ -1,3 +1,4 @@
+/*
 // Range of integers from start to finish generating
 // based on a given next and compare functions
 def rangeFor (Int Int (Int -> Int) (Int Int -> Bool) -> [Int]):
@@ -30,3 +31,4 @@ def .. (Int Int -> [Int]) { rangeTo }
 
 // Non-inclusive range (shorthand)
 def ... (Int Int -> [Int]) { rangeUntil }
+*/

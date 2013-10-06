@@ -20,3 +20,25 @@ def g (->):
   id
 
 f
+
+// Push many values onto the stack.
+\if true:
+  10 20
+else:
+  3 4
+sayInt sayInt // 10 20
+
+\if false:
+  10 20
+else:
+  3 4
+sayInt sayInt // 3 4
+
+// Read many values onto the stack.
+10 20
+\if true:
+  ->{ x y }
+  x++ y++
+else:
+  pass
+sayInt sayInt // 11 21

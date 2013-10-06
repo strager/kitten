@@ -3,6 +3,7 @@ module Kitten.Util.List
   , list
   , mapHead
   , stripCommonPrefix
+  , unfoldToN
   ) where
 
 (!?) :: [a] -> Int -> Maybe a
@@ -21,3 +22,6 @@ mapHead _ [] = []
 stripCommonPrefix :: (Eq a) => [a] -> [a] -> ([a], [a])
 stripCommonPrefix (x : xs) (y : ys) | x == y = stripCommonPrefix xs ys
 stripCommonPrefix xs ys = (xs, ys)
+
+unfoldToN :: Int -> (Int -> a) -> [a]
+unfoldToN count f = map f [0..count-1]

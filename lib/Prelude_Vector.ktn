@@ -35,14 +35,17 @@ def elem ([a] a (a a -> Bool) -> Bool):
   -> { xs x f }
   xs { x f@ } any
 
+/*
 // Whether a character is present in a string.
 def elemChar ([Char] Char -> Bool):
   {eqChar} elem
+*/
 
 // Whether an integer is present in an integer vector.
 def elemInt ([Int] Int -> Bool):
   {=} elem
 
+/*
 // Whether two vectors are equal according to the given
 // equality predicate.
 def eqVector ([a] [a] (a a -> Bool) -> Bool):
@@ -51,6 +54,7 @@ def eqVector ([a] [a] (a a -> Bool) -> Bool):
     false
   else:
     xs ys eq zipWith and
+*/
 
 // Filters a vector by a predicate.
 def filter ([a] (a -> Bool) -> [a]):
@@ -190,6 +194,7 @@ def keep ([a] Int -> [a]):
   else:
     []
 
+/*
 // Keeps elements of a vector while a predicate holds.
 def keepWhile ([a] (a -> Bool) -> [a]):
   -> { xs f }
@@ -200,6 +205,7 @@ def keepWhile ([a] (a -> Bool) -> [a]):
       drop
       xs tail f keepWhile
       x prepend
+*/
 
 // Gets the last element of a vector.
 def last ([a] -> a?):
@@ -320,10 +326,12 @@ def sort ([a] (a a -> Bool) -> [a]):
   -> lt
   [] {lt insert} foldl
 
+/*
 def span ([a] (a -> Bool) -> [a] [a]):
   -> { xs f }
   xs f keepWhile
   xs f tossWhile
+*/
 
 // Splits a vector into two parts at the given index.
 def splitAt ([a] Int -> [a] [a]):
@@ -343,6 +351,7 @@ def toss ([a] Int -> [a]):
   else:
     xs tail n-- toss
 
+/*
 // Tosses elements of a vector while a predicate holds.
 def tossWhile ([a] (a -> Bool) -> [a]):
   -> { xs f }
@@ -351,7 +360,9 @@ def tossWhile ([a] (a -> Bool) -> [a]):
     -> x
     \if x f@:
       tail f tossWhile
+*/
 
+/*
 // Transposes the rows and columns of a 2D vector.
 def transpose ([[a]] -> [[a]]):
   -> xss
@@ -365,6 +376,7 @@ def transpose ([[a]] -> [[a]]):
     ((xss {tail} map) xs prepend) transpose
     (xss {unsafeHead} map) x prepend
     prepend
+*/
 
 // Strips duplicate elements from a vector according the
 // given equality predicate.
@@ -380,8 +392,10 @@ def unique ([a] (a a -> Bool) -> [a]):
 def unsafeHead ([a] -> a):
   head fromSome
 
+/*
 def unsafeHeadTail ([a] -> a [a]):
   {unsafeHead} {tail} bothTo
+*/
 
 def unsafeLast ([a] -> a):
   last fromSome
@@ -391,10 +405,13 @@ def vector (a -> [a]):
   -> x
   [x]
 
+/*
 // Zips two lists together as pairs.
 def zip ([a] [b] -> [a & b]):
   {pair} zipWith
+*/
 
+/*
 // Zips two lists together with a function.
 def zipWith ([a] [b] (a b -> c) -> [c]):
   -> { as bs f }
@@ -406,6 +423,7 @@ def zipWith ([a] [b] (a b -> c) -> [c]):
       drop
       (as tail) (bs tail) f zipWith
       a b f@ prepend
+*/
 
 // Gets an element of a vector.
 def # ([a] Int -> a?):

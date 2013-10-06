@@ -1,3 +1,4 @@
+/*
 // Reads a decimal integer from a string.
 def readInt ([Char] -> Int?):
   -> s
@@ -9,3 +10,4 @@ def readInt ([Char] -> Int?):
       c '0' {charToInt} toBoth -
       \option s init readInt: 10 * +
       some
+*/

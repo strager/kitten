@@ -18,6 +18,8 @@ import Kitten.Error
 import Kitten.Fragment
 import Kitten.Interpret
 import Kitten.Name (NameGen, mkNameGen)
+import Kitten.SSA (fragmentToSSA)
+import Kitten.SSAToC (ssaDefinitionToC, ssaDefinitionToCProto, ssaFunctionToC, ssaFunctionToCProto)
 import Kitten.Typed (Typed)
 import Kitten.Yarn (yarn)
 import Repl
@@ -25,14 +27,18 @@ import Repl
 import qualified Kitten.Compile as Compile
 import qualified Kitten.HTML as HTML
 import qualified Kitten.Infer.Config as Infer
+import qualified Kitten.SSA as SSA
+import qualified Kitten.SSAToC as SSAToC
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as T
 
 data CompileMode
-  = CheckMode
+  = CSourceMode
+  | CheckMode
   | CompileMode
   | InterpretMode
   | HTMLMode
+  | SSAMode
 
 data Arguments = Arguments
   { argsCompileMode :: CompileMode
@@ -136,6 +142,24 @@ interpretAll entryPoints compileMode prelude config nameGen
         HTMLMode -> do
           html <- HTML.fromFragmentsM T.readFileUtf8 [prelude, result]
           T.putStrLn html
+        SSAMode -> case fragmentToSSA (prelude <> result) of
+          (fragSSA, defSSAs) -> do
+            forM_ defSSAs $ \def -> T.putStrLn
+              $ SSA.functionToText
+                (T.toText (SSA.definitionName def))
+                (SSA.definitionFunction def)
+            T.putStrLn $ SSA.functionToText "top-level" fragSSA
+        CSourceMode -> case fragmentToSSA (prelude <> result) of
+          (fragSSA, defSSAs) -> do
+            T.putStrLn SSAToC.prelude
+            let mainName = SSA.GlobalFunctionName "main"
+
+            mapM_ (T.putStrLn . ssaDefinitionToCProto) defSSAs
+            T.putStrLn $ ssaFunctionToCProto fragSSA mainName []
+
+            mapM_ (T.putStrLn . ssaDefinitionToC) defSSAs
+            T.putStrLn $ ssaFunctionToC fragSSA mainName
+            T.putStrLn $ SSAToC.main mainName
 
 parseArguments :: IO Arguments
 parseArguments = do
@@ -200,6 +224,11 @@ argumentsMode = mode "kitten" defaultArguments
       $ \flag acc@Arguments{..} -> acc
       { argsCompileMode = if flag then CompileMode else argsCompileMode }
 
+    , flagBool' ["c-source"]
+      "Compile to C source code."
+      $ \flag acc@Arguments{..} -> acc
+      { argsCompileMode = if flag then CSourceMode else argsCompileMode }
+
     , flagBool' ["check"]
       "Check syntax and types without compiling or running."
       $ \flag acc@Arguments{..} -> acc
@@ -229,6 +258,11 @@ argumentsMode = mode "kitten" defaultArguments
       "Disable implicit inclusion of prelude."
       $ \flag acc@Arguments{..} -> acc
       { argsEnableImplicitPrelude = not flag }
+
+    , flagBool' ["ssa"]
+      "Compile to SSA IR."
+      $ \flag acc@Arguments{..} -> acc
+      { argsCompileMode = if flag then SSAMode else argsCompileMode }
 
     , flagHelpSimple $ \acc -> acc { argsShowHelp = True }
     , flagVersion $ \acc -> acc { argsShowVersion = True }

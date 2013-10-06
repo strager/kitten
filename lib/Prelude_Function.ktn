@@ -1,7 +1,9 @@
+/*
 // Composes two unary functions with one result.
 def compose (.r (.s -> .t) (.t -> .u) -> .r (.s -> .u)):
   -> { f g }
   { f@ g@ }
+*/
 
 // Wraps a value in a function.
 def function (a -> (-> a)):
@@ -18,6 +20,7 @@ def id (a -> a):
   -> x
   x
 
+/*
 // Applies a unary function to two values.
 def toBoth (a a (a -> b) -> b b):
   -> { x y f }
@@ -31,6 +34,7 @@ def bothTo (a (a -> b) (a -> c) -> b c):
   x f@ -> a
   x g@ -> b
   a b
+*/
 
 // Applies two unary functions to two values.
 def both (a b (a -> c) (b -> d) -> c d):

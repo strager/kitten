@@ -18,8 +18,10 @@ module Kitten.Type
   , TypeScheme
   , (-->)
   , addHint
+  , functionArity
   , mono
   , row
+  , rowDepth
   , scalar
   , unScheme
   ) where
@@ -253,11 +255,24 @@ addRowHint type_ hint = case type_ of
   r :. t -> addRowHint r hint :. (t `addHint` hint)
   _ -> type_
 
+-- FIXME BROKEN
+-- | Returns the number of values consumed and returned by a
+-- function with the given type.
+functionArity :: Type Scalar -> Maybe (Int, Int)
+functionArity (Function r s _effect _loc)
+  = Just (rowDepth r, rowDepth s)
+functionArity _ = Nothing
+
 mono :: a -> Scheme a
 mono = Forall S.empty S.empty
 
 row :: Name -> TypeName Row
 row = TypeName
+
+rowDepth :: Type Row -> Int
+rowDepth (Empty _) = 0
+rowDepth (r :. _) = 1 + rowDepth r
+rowDepth (Var _ _) = 0
 
 scalar :: Name -> TypeName Scalar
 scalar = TypeName
