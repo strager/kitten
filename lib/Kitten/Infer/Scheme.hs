@@ -123,6 +123,9 @@ instance Free Scalar where
     Handle{} -> mempty
     Int{} -> mempty
     Named{} -> mempty
+    Quantified (Forall r s e t) _
+      -> let (rows, scalars, effects) = free t
+      in (rows \\ S.toList r, scalars \\ S.toList s, effects \\ S.toList e)
     Var name _ -> ([], [name], [])
     Unit{} -> mempty
     Vector a _ -> free a
@@ -185,6 +188,8 @@ instance Occurrences Scalar where
     Var typeName@(TypeName name') _ -> case retrieve env typeName of
       Left{} -> if name == name' then 1 else 0  -- See Note [Var Kinds].
       Right type' -> occurrences name env type'
+    Quantified (Forall _ s _ t) _
+      -> if TypeName name `S.member` s then 0 else occurrences name env t
     Unit{} -> 0
     Vector a _ -> occurrences name env a
 
@@ -258,6 +263,8 @@ instance Substitute Scalar where
     Int{} -> type_
     Handle{} -> type_
     Named{} -> type_
+    Quantified (Forall r s e t) origin
+      -> Quantified (Forall r s e (sub env t)) origin
     Var name (Origin hint _loc)
       | Right type' <- retrieve env name
       -> sub env type' `addHint` hint
