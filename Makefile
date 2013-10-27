@@ -25,8 +25,10 @@ default : build prelude unit example test
 all : deps configure default lint
 
 .PHONY : build
-build $(KITTEN) :
+build :
 	$(CABAL) build
+
+$(KITTEN) : build
 
 .PHONY : yarn
 yarn : $(YARN) $(YARN_HEADERS)
