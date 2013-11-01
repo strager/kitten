@@ -16,6 +16,7 @@ import qualified Kitten.Infer.Config as Infer
 data Config = Config
   { dumpResolved :: !Bool
   , dumpScoped :: !Bool
+  , dumpTyped :: !Bool
   , firstLine :: !Int
   , inferConfig :: !Infer.Config
   , libraryDirectories :: [FilePath]

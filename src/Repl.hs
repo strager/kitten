@@ -123,6 +123,7 @@ compileConfig = do
   return Compile.Config
     { Compile.dumpResolved = False
     , Compile.dumpScoped = False
+    , Compile.dumpTyped = False
     , Compile.firstLine = replLine
     , Compile.inferConfig = Infer.Config { enforceBottom = True }
     , Compile.libraryDirectories = []  -- TODO

@@ -38,6 +38,7 @@ data Arguments = Arguments
   { argsCompileMode :: CompileMode
   , argsDumpResolved :: Bool
   , argsDumpScoped :: Bool
+  , argsDumpTyped :: Bool
   , argsEnableImplicitPrelude :: Bool
   , argsEntryPoints :: [FilePath]
   , argsLibraryDirectories :: [FilePath]
@@ -52,6 +53,7 @@ main = do
     defaultConfig prelude filename program = Compile.Config
       { Compile.dumpResolved = argsDumpResolved arguments
       , Compile.dumpScoped = argsDumpScoped arguments
+      , Compile.dumpTyped = argsDumpTyped arguments
       , Compile.firstLine = 1
       , Compile.inferConfig = Infer.Config
         { Infer.enforceBottom = True }
@@ -161,6 +163,7 @@ argumentsMode = mode "kitten" defaultArguments
     { argsCompileMode = InterpretMode
     , argsDumpResolved = False
     , argsDumpScoped = False
+    , argsDumpTyped = False
     , argsEnableImplicitPrelude = True
     , argsEntryPoints = []
     , argsLibraryDirectories = []
@@ -214,6 +217,11 @@ argumentsMode = mode "kitten" defaultArguments
       "Output result of scope resolution."
       $ \flag acc@Arguments{..} -> acc
       { argsDumpScoped = flag }
+
+    , flagBool' ["dump-typed"]
+      "Output result of typechecking."
+      $ \flag acc@Arguments{..} -> acc
+      { argsDumpTyped = flag }
 
     , flagBool' ["html"]
       "Output an HTML document for viewing the type-checked source code."
