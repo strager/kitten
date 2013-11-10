@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -47,26 +48,74 @@ import qualified Kitten.Type as Type
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as Text
 
-data Function = Function
-  { funcInputs :: !Int
-  , funcOutputs :: !Int
-  , funcInstructions :: !(Vector Instruction)
-  , funcClosures :: !(Vector Closure)
-  , funcLocation :: !Location
-  }
+data Form = Template | Normal
+
+data TemplateParameter
+  = RowParam
+
+instance Show TemplateParameter where
+  show = Text.unpack . toText
+
+instance ToText TemplateParameter where
+  toText RowParam = "row"
+
+data TemplateArgument
+  = RowArg !Int
+
+newtype TemplateVar = TemplateVar Int
+
+instance Show TemplateVar where
+  show = Text.unpack . toText
+
+instance ToText TemplateVar where
+  toText (TemplateVar var) = "<t" <> showText var <> ">"
+
+data TemplateParameters (form :: Form) where
+  NoParameters :: TemplateParameters Normal
+  Parameters
+    -- TODO(strager): Disallow empty vector!
+    :: !(Vector TemplateParameter)
+    -> TemplateParameters Template
+
+data AFunction
+  = NormalFunction !(Function Normal)
+  | TemplateFunction !(Function Template)
+
+instance Show AFunction where
+  show = Text.unpack . toText
+
+instance ToText AFunction where
+  toText (NormalFunction f) = toText f
+  toText (TemplateFunction f) = toText f
+
+data Function (form :: Form) where
+  Function
+    { funcInputs :: !(RowArity form)
+    , funcOutputs :: !(RowArity form)
+    , funcInstructions :: !(Vector (Instruction form))
+
+    , funcClosures :: !(Vector (Closure form))
+    -- ^ Closures available only to this function.
+
+    , funcTemplateParameters :: TemplateParameters form
+    -- ^ Template parameters, if this function is a
+    -- template.
+
+    , funcLocation :: !Location
+    } :: Function form
 
 data Definition = Definition
   { definitionName :: !GlobalFunctionName
-  , definitionFunction :: !Function
+  , definitionFunction :: !AFunction
   }
 
-data Closure = Closure
+data Closure (form :: Form) = Closure
   { closureClosed :: !Int
   -- ^ Number of variables capture by this closure.
-  , closureFunction :: !Function
+  , closureFunction :: !(Function form)
   }
 
-instance Show Function where
+instance Show (Function form) where
   show = Text.unpack . toText
 
 mapVector :: (a -> b) -> Vector a -> [b]
@@ -81,17 +130,25 @@ unwordsVector = Text.unwords . map toText . V.toList
 vectorToLines :: (ToText a) => Vector a -> Text
 vectorToLines = Text.unlines . vectorToTextList
 
-instance ToText Function where
+instance ToText (Function form) where
   toText = functionToText "<unknown>"
 
-functionToText :: Text -> Function -> Text
+functionToText :: Text -> Function form -> Text
 functionToText name Function{..} = Text.unlines
   [ Text.concat
+
     [ name
+    , case funcTemplateParameters of
+      NoParameters -> ""
+      Parameters params
+        -> " <"
+        <> Text.intercalate " "
+          (V.toList $ V.imap showTemplateParameter params)
+        <> ">"
     , " ("
-    , showText funcInputs
+    , toText funcInputs
     , " -> "
-    , showText funcOutputs
+    , toText funcOutputs
     , "):"
     ]
   , Text.indent $ vectorToLines funcInstructions
@@ -100,25 +157,102 @@ functionToText name Function{..} = Text.unlines
       (toText (ClosureName index)) (closureFunction closure))
     funcClosures
   ]
+  where
+  showTemplateParameter :: Int -> TemplateParameter -> Text
+  showTemplateParameter i param
+    = toText (TemplateVar i) <> ":" <> toText param
+
+data RowArity (form :: Form) where
+  RowArity :: !Int -> RowArity form
+  RowTemplateArity :: !TemplateVar -> RowArity Template
+
+instance Show (RowArity form) where
+  show = Text.unpack . toText
+
+instance ToText (RowArity form) where
+  toText (RowArity arity) = showText arity
+  toText (RowTemplateArity var) = showText var
+
+data RowVar (form :: Form) where
+  RowVars :: !(Vector Var) -> RowVar form
+  RowTemplateVar :: !TemplateVar -> !Var -> RowVar Template
+
+instance Show (RowVar form) where
+  show = Text.unpack . toText
+
+instance ToText (RowVar form) where
+  toText (RowVars vars) = unwordsVector vars
+  toText (RowTemplateVar templateVar var)
+    = "<" <> toText templateVar <> ">" <> toText var
 
 -- | An SSA instruction.  Arguments are ordered input first,
 -- output last, except for 'Return'.
-data Instruction
-  = Activation !ClosureName !(Vector Var) !Var !Location
-  | Bool !Bool !Var !Location
-  | Char !Char !Var !Location
-  | Call !GlobalFunctionName !(Vector Var) !(Vector Var) !Location
-  | CallBuiltin !BuiltinCall !Location
-  | Float !Double !Var !Location
-  | Int !Int !Var !Location
-  | PairTerm !Var !Var !Var !Location
-  | Return !(Vector Var) !Location
-  | Vector !(Vector Var) !Var !Location
+data Instruction (form :: Form) where
+  Activation
+    :: !ClosureName
+    -> !(Vector Var)     -- ^ Captured variables.
+    -> !Var
+    -> !Location
+    -> Instruction form
 
-instance Show Instruction where
+  Bool
+    :: !Bool
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+  Char
+    :: !Char
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+  Call
+    :: !GlobalFunctionName
+    -> !(RowVar form)
+    -> !(RowVar form)
+    -> !Location
+    -> Instruction form
+
+  CallBuiltin
+    :: !(BuiltinCall form)
+    -> !Location
+    -> Instruction form
+
+  Float
+    :: !Double
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+  Int
+    :: !Int
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+  PairTerm
+    :: !Var
+    -> !Var
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+  Return
+    :: !(Vector Var)
+    -> !Location
+    -> Instruction form
+
+  Vector
+    :: !(Vector Var)
+    -> !Var
+    -> !Location
+    -> Instruction form
+
+instance Show (Instruction form) where
   show = Text.unpack . toText
 
-instance ToText Instruction where
+instance ToText (Instruction form) where
   toText instruction = case instruction of
     Activation funcName closed out _ -> Text.unwords
       [ bind out ["act", toText funcName]
@@ -128,9 +262,9 @@ instance ToText Instruction where
       ["bool", if value then "true" else "false"]
     Char value out _ -> bind out ["char", showText value]
     Call funcName params outs _ -> Text.unwords
-      [ unwordsVector outs
+      [ toText outs
       , "<-", "call", toText funcName
-      , unwordsVector params
+      , toText params
       ]
     CallBuiltin builtin _ -> toText builtin
     Float value out _ -> bind out ["float", showText value]
@@ -142,111 +276,125 @@ instance ToText Instruction where
       , unwordsVector values
       ]
 
-data BuiltinCall
-  = AddFloat !Var !Var !Var
-  | AddInt !Var !Var !Var
-  | AddVector !Var !Var !Var
-  | AndBool !Var !Var !Var
-  | AndInt !Var !Var !Var
-  | Apply
-    !Var           -- ^ Activation.
-    !(Vector Var)  -- ^ Inputs.
-    !(Vector Var)  -- ^ Outputs.
-  | CharToInt !Var !Var
-  | Choice
-    !Var           -- ^ Left activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | ChoiceElse
-    !Var           -- ^ Right activation.
-    !Var           -- ^ Left activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | Close !Var
-  | DivFloat !Var !Var !Var
-  | DivInt !Var !Var !Var
-  | EqFloat !Var !Var !Var
-  | EqInt !Var !Var !Var
-  | Exit !Var
-  | First !Var !Var
-  | FromLeft !Var !Var
-  | FromRight !Var !Var
-  | FromSome !Var !Var
-  | GeFloat !Var !Var !Var
-  | GeInt !Var !Var !Var
-  | Get !Var !Var !Var
-  | GetLine !Var !Var
-  | GtFloat !Var !Var !Var
-  | GtInt !Var !Var !Var
-  | If
-    !Var           -- ^ Truthy activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | IfElse
-    !Var           -- ^ Falsy activation.
-    !Var           -- ^ Truthy activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | Init !Var !Var
-  | IntToChar !Var !Var
-  | LeFloat !Var !Var !Var
-  | LeInt !Var !Var !Var
-  | Length !Var !Var
-  | LtFloat !Var !Var !Var
-  | LtInt !Var !Var !Var
-  | MakeLeft !Var !Var
-  | MakeRight !Var !Var
-  | ModFloat !Var !Var !Var
-  | ModInt !Var !Var !Var
-  | MulFloat !Var !Var !Var
-  | MulInt !Var !Var !Var
-  | NeFloat !Var !Var !Var
-  | NeInt !Var !Var !Var
-  | NegFloat !Var !Var
-  | NegInt !Var !Var
-  | None !Var
-  | NotBool !Var !Var
-  | NotInt !Var !Var
-  | OpenIn !Var
-  | OpenOut !Var
-  | Option
-    !Var           -- ^ Some activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | OptionElse
-    !Var           -- ^ None activation.
-    !Var           -- ^ Some activation.
-    !Var           -- ^ Condition.
-    !(Vector Var)  -- ^ Extra inputs.
-    !(Vector Var)  -- ^ Extra outputs.
-  | OrBool !Var !Var !Var
-  | OrInt !Var !Var !Var
-  | Pair !Var !Var !Var
-  | Print !Var !Var
-  | Rest !Var !Var
-  | Set !Var !Var !Var !Var
-  | ShowFloat !Var !Var
-  | ShowInt !Var !Var
-  | Some !Var !Var
-  | Stderr !Var
-  | Stdin !Var
-  | Stdout !Var
-  | SubFloat !Var !Var !Var
-  | SubInt !Var !Var !Var
-  | Tail !Var !Var
-  | UnsafePurify11 !Var !Var
-  | XorBool !Var !Var !Var
-  | XorInt !Var !Var !Var
+data BuiltinCall (form :: Form) where
+  AddFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
+  AddInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  AddVector      :: !Var -> !Var -> !Var -> BuiltinCall form
+  AndBool        :: !Var -> !Var -> !Var -> BuiltinCall form
+  AndInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  CharToInt      :: !Var -> !Var -> BuiltinCall form
+  Close          :: !Var -> BuiltinCall form
+  DivFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
+  DivInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  EqFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  EqInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  Exit           :: !Var -> BuiltinCall form
+  First          :: !Var -> !Var -> BuiltinCall form
+  FromLeft       :: !Var -> !Var -> BuiltinCall form
+  FromRight      :: !Var -> !Var -> BuiltinCall form
+  FromSome       :: !Var -> !Var -> BuiltinCall form
+  GeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  GeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  Get            :: !Var -> !Var -> !Var -> BuiltinCall form
+  GetLine        :: !Var -> !Var -> BuiltinCall form
+  GtFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  GtInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  Init           :: !Var -> !Var -> BuiltinCall form
+  IntToChar      :: !Var -> !Var -> BuiltinCall form
+  LeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  LeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  Length         :: !Var -> !Var -> BuiltinCall form
+  LtFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  LtInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  MakeLeft       :: !Var -> !Var -> BuiltinCall form
+  MakeRight      :: !Var -> !Var -> BuiltinCall form
+  ModFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
+  ModInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  MulFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
+  MulInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  NeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
+  NeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  NegFloat       :: !Var -> !Var -> BuiltinCall form
+  NegInt         :: !Var -> !Var -> BuiltinCall form
+  None           :: !Var -> BuiltinCall form
+  NotBool        :: !Var -> !Var -> BuiltinCall form
+  NotInt         :: !Var -> !Var -> BuiltinCall form
+  OpenIn         :: !Var -> BuiltinCall form
+  OpenOut        :: !Var -> BuiltinCall form
+  OrBool         :: !Var -> !Var -> !Var -> BuiltinCall form
+  OrInt          :: !Var -> !Var -> !Var -> BuiltinCall form
+  Pair           :: !Var -> !Var -> !Var -> BuiltinCall form
+  Print          :: !Var -> !Var -> BuiltinCall form
+  Rest           :: !Var -> !Var -> BuiltinCall form
+  Set            :: !Var -> !Var -> !Var -> !Var -> BuiltinCall form
+  ShowFloat      :: !Var -> !Var -> BuiltinCall form
+  ShowInt        :: !Var -> !Var -> BuiltinCall form
+  Some           :: !Var -> !Var -> BuiltinCall form
+  Stderr         :: !Var -> BuiltinCall form
+  Stdin          :: !Var -> BuiltinCall form
+  Stdout         :: !Var -> BuiltinCall form
+  SubFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
+  SubInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  Tail           :: !Var -> !Var -> BuiltinCall form
+  UnsafePurify11 :: !Var -> !Var -> BuiltinCall form
+  XorBool        :: !Var -> !Var -> !Var -> BuiltinCall form
+  XorInt         :: !Var -> !Var -> !Var -> BuiltinCall form
 
-instance Show BuiltinCall where
+  Apply
+    :: !Var              -- ^ Activation.
+    -> !(RowVar form)    -- ^ Inputs.
+    -> !(RowVar form)    -- ^ Outputs.
+    -> BuiltinCall form
+
+  Choice
+    :: !Var              -- ^ Left activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+  ChoiceElse
+    :: !Var              -- ^ Right activation.
+    -> !Var              -- ^ Left activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+  If
+    :: !Var              -- ^ Truthy activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+  IfElse
+    :: !Var              -- ^ Falsy activation.
+    -> !Var              -- ^ Truthy activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+  Option
+    :: !Var              -- ^ Some activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+  OptionElse
+    :: !Var              -- ^ None activation.
+    -> !Var              -- ^ Some activation.
+    -> !Var              -- ^ Condition.
+    -> !(RowVar form)    -- ^ Extra inputs.
+    -> !(RowVar form)    -- ^ Extra outputs.
+    -> BuiltinCall form
+
+instance Show (BuiltinCall form) where
   show = Text.unpack . toText
 
-instance ToText BuiltinCall where
+instance ToText (BuiltinCall form) where
   toText builtin = case builtin of
     AddFloat a b out     -> bind out ["addFloat", toText a, toText b]
     AddInt a b out       -> bind out ["addInt", toText a, toText b]
@@ -310,48 +458,47 @@ instance ToText BuiltinCall where
     UnsafePurify11 a out -> bind out ["unsafePurify11", toText a]
     XorBool a b out      -> bind out ["xorBool", toText a, toText b]
     XorInt a b out       -> bind out ["xorInt", toText a, toText b]
-    Apply func inputs outputs -> bindMany outputs
-        ["apply", toText func, unwordsVector inputs]
-    Choice leftFunc cond inputs outputs -> bindMany outputs
+    Apply func inputs outputs -> bindRow outputs
+        ["apply", toText func, toText inputs]
+    Choice leftFunc cond inputs outputs -> bindRow outputs
         [ "choice", toText cond
         , toText leftFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
-    ChoiceElse rightFunc leftFunc cond inputs outputs -> bindMany outputs
+    ChoiceElse rightFunc leftFunc cond inputs outputs -> bindRow outputs
         [ "choiceElse", toText cond
         , toText leftFunc, toText rightFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
-    If trueFunc cond inputs outputs -> bindMany outputs
+    If trueFunc cond inputs outputs -> bindRow outputs
         [ "if", toText cond
         , toText trueFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
-    IfElse falseFunc trueFunc cond inputs outputs -> bindMany outputs
+    IfElse falseFunc trueFunc cond inputs outputs -> bindRow outputs
         [ "ifElse", toText cond
         , toText trueFunc, toText falseFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
-    Option someFunc cond inputs outputs -> bindMany outputs
+    Option someFunc cond inputs outputs -> bindRow outputs
         [ "choice", toText cond
         , toText someFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
-    OptionElse noneFunc someFunc cond inputs outputs -> bindMany outputs
+    OptionElse noneFunc someFunc cond inputs outputs -> bindRow outputs
         [ "optionElse", toText cond
         , toText someFunc, toText noneFunc
-        , unwordsVector inputs
+        , toText inputs
         ]
 
-bindMany :: Vector Var -> [Text] -> Text
-bindMany vars rest = Text.unwords
-  $ vectorToTextList vars ++  "<-" : rest
+bindRow :: RowVar form -> [Text] -> Text
+bindRow row rest = toText row <> " <- " <> Text.unwords rest
 
 bind :: Var -> [Text] -> Text
-bind var = bindMany (V.singleton var)
+bind var = bindRow (RowVars (V.singleton var))
 
 bindNone :: [Text] -> Text
-bindNone = bindMany V.empty
+bindNone = bindRow (RowVars V.empty)
 
 data Var = Var !Int !VarType
   deriving (Eq)
@@ -377,6 +524,10 @@ instance Show ClosureName where
 instance ToText ClosureName where
   toText (ClosureName index) = "c" <> showText index
 
+data FunctionRef
+  = NormalRef !GlobalFunctionName
+  | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
+
 newtype GlobalFunctionName = GlobalFunctionName Text
 
 instance Show GlobalFunctionName where
@@ -390,7 +541,7 @@ data GlobalEnv = GlobalEnv
   }
 
 data FunctionEnv = FunctionEnv
-  { envClosures :: !(Vector Closure)
+  { envClosures :: !(Vector (Closure Template))
   , envDataIndex :: !Int
   , envDataStack :: ![Var]
   , envLocalIndex :: !Int
@@ -417,11 +568,11 @@ defaultFunctionEnv = FunctionEnv
 
 type GlobalState = StateT Location (Reader GlobalEnv)
 type FunctionState = StateT FunctionEnv GlobalState
-type FunctionWriter = WriterT (Vector Instruction) FunctionState
+type FunctionWriter = WriterT (Vector (Instruction Template)) FunctionState
 
 fragmentToSSA
   :: Fragment Typed
-  -> (Function, [Definition])
+  -> (Function Normal, [Definition])
 fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
   = flip runReader GlobalEnv { envDefs = fragmentDefs }
   . flip evalStateT UnknownLocation $ do
@@ -511,7 +662,7 @@ pushLocalVar var = modify $ \env -> env
 functionToSSA
   :: Typed
   -> Location
-  -> GlobalState Function
+  -> GlobalState AFunction
 functionToSSA term loc = do
   (instructions, env) <- flip runStateT defaultFunctionEnv
     . execWriterT $ do
@@ -707,7 +858,7 @@ builtinToSSA theBuiltin loc type_ = do
   err :: String -> a
   err m = error $ "Kitten.SSA.builtinToSSA: " ++ m
 
-addClosure :: Closure -> FunctionState ClosureName
+addClosure :: Closure Template -> FunctionState ClosureName
 addClosure closure = do
   index <- liftM V.length $ gets envClosures
   modify $ \env -> env { envClosures = envClosures env `V.snoc` closure }

@@ -489,6 +489,7 @@ builtinCallToC builtinCall = case builtinCall of
   SSA.XorBool a b out      -> mkVar out Builtin.XorBool        [b, a]
   SSA.XorInt a b out       -> mkVar out Builtin.XorInt         [b, a]
   SSA.Apply func inputs outputs
+    -- def __apply (.r (.r -> .s +e) -> .s +e)
     -> declareVars outputs
       . macroCall "KTN_APPLY"
       $ closureReturnTypeFromArity (V.length outputs)

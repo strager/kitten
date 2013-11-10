@@ -131,3 +131,15 @@ Optimization of `dup`, `drop`, and `swap` is trivial, as
 
     swap (p0 p1):
       return p1 p0
+
+## Templates
+
+Kitten source:
+
+    def myApply (.r (.r -> .s) -> .s): apply
+
+SSA form:
+
+    myApply <r_args s_args> ((r_args)p0 p1):
+      (s_args)s0 <- call p1 (r_args)p0
+      return (s_args)s0
