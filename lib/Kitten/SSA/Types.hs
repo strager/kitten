@@ -20,6 +20,7 @@ module Kitten.SSA.Types
   , RowVar(..)
   , TemplateParameter(..)
   , TemplateParameters(..)
+  , TemplateVar(..)
   , Var(..)
   , VarType(..)
 
@@ -446,6 +447,7 @@ instance ToText (BuiltinCall form) where
         , toText inputs
         ]
 
+-- TODO(strager): Make variable index a newtype.
 data Var = Var !Int !VarType
   deriving (Eq)
 
@@ -456,8 +458,10 @@ instance ToText Var where
   toText (Var index Closed) = "k" <> showText index
   toText (Var index Data) = "s" <> showText index
   toText (Var index Parameter) = "p" <> showText index
+  toText (Var index (RowVar t))
+    = "<" <> toText t <> ">r" <> showText index
 
-data VarType = Closed | Data | Parameter
+data VarType = Closed | Data | Parameter | RowVar !TemplateVar
   deriving (Eq)
 
 -- * Rows.
@@ -517,6 +521,7 @@ instance ToText GlobalFunctionName where
 
 data TemplateParameter
   = RowParam !(Type.TypeName Type.Row)
+  deriving (Eq, Ord)
 
 instance Show TemplateParameter where
   show = Text.unpack . toText
@@ -525,6 +530,7 @@ instance ToText TemplateParameter where
   toText (RowParam var) = "row(" <> toText var <> ")"
 
 newtype TemplateVar = TemplateVar Int
+  deriving (Eq)
 
 instance Show TemplateVar where
   show = Text.unpack . toText

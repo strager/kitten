@@ -9,13 +9,14 @@ module Kitten.SSA
   ( fragmentToSSA
   ) where
 
+import Debug.Trace
+
 import Control.Applicative
 import Control.Monad (forM, liftM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader hiding (local)
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
-import Data.Maybe (fromMaybe)
 import Data.Vector (Vector)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -47,6 +48,7 @@ data FunctionEnv = FunctionEnv
   , envDataStack :: ![Var]
   , envLocalIndex :: !Int
   , envLocalStack :: ![Var]
+  , envTemplateParameters :: Vector TemplateParameter
 
   -- HACK(strager)
   , envParameterIndex :: !Int
@@ -61,6 +63,7 @@ defaultFunctionEnv = FunctionEnv
   , envDataStack = []
   , envLocalIndex = 0
   , envLocalStack = []
+  , envTemplateParameters = V.empty
 
   , envParameterIndex = 0
   , envInferredInputArity = 0
@@ -70,9 +73,7 @@ defaultFunctionEnv = FunctionEnv
 type GlobalState = StateT Location (Reader GlobalEnv)
 type FunctionState = StateT FunctionEnv GlobalState
 type FunctionWriter
-  = WriterT (Vector (Instruction Template))
-    (WriterT (Vector TemplateParameter)
-      FunctionState)
+  = WriterT (Vector (Instruction Template)) FunctionState
 
 fragmentToSSA
   :: Fragment Typed
@@ -135,15 +136,18 @@ pop = do
         }
       return (Var param Parameter)
 
+freshVarIndex :: FunctionState Int
+freshVarIndex = do
+  env <- get
+  let FunctionEnv{envDataIndex} = env
+  put env { envDataIndex = envDataIndex + 1 }
+  return envDataIndex
+
 push :: FunctionState Var
 push = do
-  env <- get
-  let FunctionEnv{envDataIndex, envDataStack} = env
-  let var = Var envDataIndex Data
-  put env
-    { envDataIndex = envDataIndex + 1
-    , envDataStack = var : envDataStack
-    }
+  index <- freshVarIndex
+  let var = Var index Data
+  pushVar var
   return var
 
 pushVar :: Var -> FunctionState ()
@@ -174,9 +178,10 @@ functionToSSA
   -> Location
   -> GlobalState AFunction
 functionToSSA term loc = do
-  ((instructions, templateParameters), env)
-    <- flip runStateT defaultFunctionEnv
-    . runWriterT . execWriterT $ do
+  (instructions, env)
+    <- traceShow (Typed.typedType term, loc)
+    $ flip runStateT defaultFunctionEnv
+    . execWriterT $ do
       functionPrelude 0  -- FIXME(strager)
       termToSSA term
       functionEpilogue 0  -- FIXME(strager)
@@ -191,7 +196,7 @@ functionToSSA term loc = do
     , funcOutputs = outputs
     , funcInstructions = instructions
     , funcClosures = envClosures env
-    , funcTemplateParameters = Parameters templateParameters
+    , funcTemplateParameters = Parameters (envTemplateParameters env)
     , funcLocation = loc
     }
 
@@ -232,9 +237,9 @@ functionPrelude _arity = return ()
 -- TODO(strager): Use arity instead of 'pop'-like hacks.
 functionEpilogue :: Int -> FunctionWriter ()
 functionEpilogue _arity = do
-  env <- lift $ lift get
+  env <- liftState get
   let returnValues = envDataStack env
-  lift . lift $ put env
+  liftState $ put env
     { envDataStack = []
     , envInferredOutputArity = length returnValues
     }
@@ -248,35 +253,90 @@ setLocation = liftGlobalState . put
 tellInstruction :: Instruction Template -> FunctionWriter ()
 tellInstruction = tell . V.singleton
 
+-- TODO(strager): Find a better name.
+tellTemplateParameter
+  :: TemplateParameter -> FunctionState TemplateVar
+tellTemplateParameter parameter = do
+  parameters <- gets envTemplateParameters
+  let var = TemplateVar (V.length parameters)
+  modify $ \s -> s
+    { envTemplateParameters = parameters `V.snoc` parameter }
+  return var
+
 liftState :: FunctionState a -> FunctionWriter a
-liftState = lift . lift
+liftState = lift
 
 liftGlobalState :: GlobalState a -> FunctionWriter a
-liftGlobalState = lift . lift . lift
+liftGlobalState = lift . lift
+
+popRow :: RowArity form -> FunctionState (RowVar form)
+popRow (ScalarArity scalars)
+  = ScalarVars <$> V.replicateM scalars pop
+popRow (TemplateArity templateVar scalars) = do
+  rowVar <- pop
+  -- TODO(strager): Initialize the stack with a row variable
+  -- (in functionToSSA), and assert here that 'rowVar' is
+  -- actually a 'RowVar' (with the same template variable).
+  scalarVars <- V.replicateM scalars pop
+  return $ TemplateRowScalarVars templateVar rowVar scalarVars
+
+pushRow :: RowArity form -> FunctionState (RowVar form)
+pushRow (ScalarArity scalars)
+  = ScalarVars <$> V.replicateM scalars push
+pushRow (TemplateArity templateVar scalars) = do
+  rowIndex <- freshVarIndex
+  let rowVar = Var rowIndex (RowVar templateVar)
+  pushVar rowVar
+  scalarVars <- V.replicateM scalars push
+  return $ TemplateRowScalarVars templateVar rowVar scalarVars
+
+-- | FIXME(strager): Better description.  Returns the number
+-- of values consumed and returned by a function with the
+-- given type.
+functionRowArity
+  :: Type Type.Scalar
+  -> FunctionState (RowArity Template, RowArity Template)
+functionRowArity = \case
+  Type.Function r s _effect _loc
+    | rBottommost == sBottommost
+    -> return (ScalarArity (Type.rowDepth r), ScalarArity (Type.rowDepth s))
+    | otherwise -> do
+      rVar <- tellTemplateParameter $ RowParam (rowVar rBottommost)
+      sVar <- tellTemplateParameter $ RowParam (rowVar sBottommost)
+      return
+        ( TemplateArity rVar (Type.rowDepth r)
+        , TemplateArity sVar (Type.rowDepth s)
+        )
+    where
+    rBottommost, sBottommost :: Type Type.Row
+    rBottommost = Type.bottommost r
+    sBottommost = Type.bottommost s
+    rowVar :: Type Type.Row -> Type.TypeName Type.Row
+    rowVar (Type.Var var _loc) = var
+    rowVar type_ = error $ "Not a row variable: " ++ show type_
+  type_ -> error $ "Not a function type: " ++ show type_
 
 termToSSA :: Typed -> FunctionWriter ()
 termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
   Typed.Builtin builtin loc type_ -> builtinToSSA builtin loc type_
   Typed.Call name loc _type -> do
-    -- HACK(strager): _type has supliferous scalars on
+    fn <- liftGlobalState $ lookUpFunction name
+    {-
+    -- HACK(strager): _type has superfluous scalars on
     -- either side of the function type, throwing off
     -- functionArity.  We therefore look up the type from
     -- the function's definition.
-    fn <- lift . lift . lift $ lookUpFunction name
     let type_ = Typed.typedType (Type.unScheme (defTerm fn))
+    -}
+    let type_ = _type
 
     -- TODO(strager): Allow polymorphic arity.
-    case Type.functionArity type_ of
-      Nothing -> funcFailure
-        $ "Could not get arity of function " ++ show fn
-      Just (inArity, outArity) -> do
-        inputs <- lift . lift $ V.replicateM inArity pop
-        outputs <- lift . lift $ V.replicateM outArity push
-        let funcName = GlobalFunctionName (defName fn)
-        tellInstruction $ Call funcName
-          (ScalarVars (V.reverse inputs))
-          (ScalarVars outputs)
-          loc
+    traceShow type_ (return())
+    (inArity, outArity) <- liftState $ functionRowArity type_
+    inputs <- liftState $ popRow inArity
+    outputs <- liftState $ pushRow outArity
+    let funcName = GlobalFunctionName (defName fn)
+    tellInstruction $ Call funcName inputs outputs loc
   Typed.Compose terms _loc _type -> V.mapM_ termToSSA terms
   Typed.From{} -> return ()
   Typed.PairTerm a b loc _type -> do
@@ -369,61 +429,44 @@ builtinToSSA theBuiltin loc type_ = do
     Builtin.UnsafePurify11 -> Just $ UnsafePurify11 <$> pop <*> push
     Builtin.XorBool        -> Just $ XorBool        <$> pop <*> pop <*> push
     Builtin.XorInt         -> Just $ XorInt         <$> pop <*> pop <*> push
-    -- TODO(strager): Allow polymorphic builtins.
-    Builtin.Apply -> Just $ Apply
+    Builtin.Apply -> Just . rowPolymorphic 0 $ Apply
       <$> pop
-      <*> pushInputs 0
-      <*> pushOutputs
-    Builtin.Choice -> Just $ Choice
+    Builtin.Choice -> Just . rowPolymorphic 1 $ Choice
       <$> pop
       <*> pop
-      <*> pushInputs 1
-      <*> pushOutputs
-    Builtin.ChoiceElse -> Just $ ChoiceElse
+    Builtin.ChoiceElse -> Just . rowPolymorphic 1 $ ChoiceElse
       <$> pop
       <*> pop
       <*> pop
-      <*> pushInputs 1
-      <*> pushOutputs
-    Builtin.If -> Just $ If
+    Builtin.If -> Just . rowPolymorphic 0 $ If
       <$> pop
       <*> pop
-      <*> pushInputs 0
-      <*> pushOutputs
-    Builtin.IfElse -> Just $ IfElse
+    Builtin.IfElse -> Just . rowPolymorphic 0 $ IfElse
       <$> pop
       <*> pop
       <*> pop
-      <*> pushInputs 0
-      <*> pushOutputs
-    Builtin.Option -> Just $ Option
+    Builtin.Option -> Just . rowPolymorphic 1 $ Option
       <$> pop
       <*> pop
-      <*> pushInputs 1
-      <*> pushOutputs
-    Builtin.OptionElse -> Just $ OptionElse
+    Builtin.OptionElse -> Just . rowPolymorphic 0 $ OptionElse
       <$> pop
       <*> pop
       <*> pop
-      <*> pushInputs 0
-      <*> pushOutputs
   case mbuiltin of
     Nothing -> return ()
     Just builtin -> tellInstruction $ CallBuiltin builtin loc
   where
-  inputs, outputs :: Int
-  ~(~inputs, ~outputs) = case type_ of
-    Type.Function (_ Type.:. functionType) _rhs _effect _loc
-      -> fromMaybe (err $ "failed to get arity of type " ++ show functionType)
-        $ Type.functionArity functionType
-    _ -> err $ "failed to find function argument for builtin " ++ show theBuiltin ++ " in type " ++ show type_
-
-  -- TODO(strager): Allow RowTemplateVar.
-  pushInputs :: Int -> FunctionState (RowVar Template)
-  pushInputs argsToDrop
-    = ScalarVars <$> V.replicateM (inputs - argsToDrop) pop
-  pushOutputs :: FunctionState (RowVar Template)
-  pushOutputs = ScalarVars <$> V.replicateM outputs push
+  rowPolymorphic
+    :: Int
+    -> (FunctionState (RowVar Template -> RowVar Template -> a))
+    -> FunctionState a
+  -- TODO(strager): Use _argsToDrop.
+  rowPolymorphic _argsToDrop constructor = do
+    (inputs, outputs) <- case type_ of
+      Type.Function (_ Type.:. functionType) _rhs _effect _loc
+        -> functionRowArity functionType
+      _ -> err $ "failed to find function argument for builtin " ++ show theBuiltin ++ " in type " ++ show type_
+    constructor <*> popRow inputs <*> pushRow outputs
 
   err :: String -> a
   err m = error $ "Kitten.SSA.builtinToSSA: " ++ m

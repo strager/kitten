@@ -18,7 +18,7 @@ module Kitten.Type
   , TypeScheme
   , (-->)
   , addHint
-  , functionArity
+  , bottommost
   , mono
   , row
   , rowDepth
@@ -110,7 +110,7 @@ instance ToText (Type Row) where
       -> ".r" <> showText index <> suffix o
 
 suffix :: Origin -> Text
-suffix (Origin hint _) = case hint of
+suffix (Origin _hint _) = {-case hint of
   Local name -> " (type of " <> name <> ")"
   AnnoType annotated
     -> " (type of " <> toText annotated <> ")"
@@ -120,7 +120,7 @@ suffix (Origin hint _) = case hint of
     -> " (input to " <> toText annotated <> ")"
   AnnoFunctionOutput annotated
     -> " (output of " <> toText annotated <> ")"
-  NoHint -> ""
+  NoHint -> ""-} ""
 
 newtype TypeName (a :: Kind) = TypeName { unTypeName :: Name }
   deriving (Eq, Ord)
@@ -255,13 +255,11 @@ addRowHint type_ hint = case type_ of
   r :. t -> addRowHint r hint :. (t `addHint` hint)
   _ -> type_
 
--- FIXME BROKEN
--- | Returns the number of values consumed and returned by a
--- function with the given type.
-functionArity :: Type Scalar -> Maybe (Int, Int)
-functionArity (Function r s _effect _loc)
-  = Just (rowDepth r, rowDepth s)
-functionArity _ = Nothing
+bottommost :: Type Row -> Type Row
+bottommost type_ = case type_ of
+  Empty{} -> type_
+  r :. _ -> bottommost r
+  Var{} -> type_
 
 mono :: a -> Scheme a
 mono = Forall S.empty S.empty
@@ -270,9 +268,10 @@ row :: Name -> TypeName Row
 row = TypeName
 
 rowDepth :: Type Row -> Int
-rowDepth (Empty _) = 0
-rowDepth (r :. _) = 1 + rowDepth r
-rowDepth (Var _ _) = 0
+rowDepth = \case
+  Empty{} -> 0
+  r :. _ -> 1 + rowDepth r
+  Var{} -> 0
 
 scalar :: Name -> TypeName Scalar
 scalar = TypeName
