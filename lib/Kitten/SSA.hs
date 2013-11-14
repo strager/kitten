@@ -232,13 +232,18 @@ castInstructions
 -- FIXME(strager): Should throw a runtime error upon failure.
 castInstructions = unsafeCoerce
 
--- TODO(strager): Remove hacks in 'pop' and use this instead.
 functionPrelude :: RowArity form -> FunctionWriter ()
 functionPrelude arity = case arity of
-  ScalarArity _scalars -> return ()
-  TemplateArity templateVar _scalars -> do
+  ScalarArity scalars -> liftState $ pushInputs scalars
+  TemplateArity templateVar scalars -> do
     rowIndex <- liftState freshVarIndex
     liftState . pushVar $ Var rowIndex (RowVar templateVar)
+    liftState $ pushInputs scalars
+  where
+  pushInputs :: Int -> FunctionState ()
+  pushInputs count = mapM_ pushInput [0 .. count - 1]
+  pushInput :: Int -> FunctionState ()
+  pushInput index = pushVar $ Var index Parameter
 
 -- TODO(strager): Use arity instead of 'pop'-like hacks.
 functionEpilogue :: RowArity form -> FunctionWriter ()

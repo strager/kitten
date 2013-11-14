@@ -495,9 +495,9 @@ instance Show (RowVar form) where
 instance ToText (RowVar form) where
   toText (ScalarVars scalars) = unwordsVector scalars
   toText (TemplateRowScalarVars templateVar var scalars)
-    = Text.unwords
-    $ "<" <> toText templateVar <> ">" <> toText var
-    : map toText (V.toList scalars)
+    = toText templateVar <> "("
+    <> Text.unwords (toText var : map toText (V.toList scalars))
+    <> ")"
 
 -- * Names.
 
