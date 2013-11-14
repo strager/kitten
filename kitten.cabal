@@ -81,6 +81,7 @@ library
     Kitten.Resolve.Monad,
     Kitten.Resolved,
     Kitten.SSA,
+    Kitten.SSA.Types,
     Kitten.SSAToC,
     Kitten.Scope,
     Kitten.Term,

@@ -27,7 +27,7 @@ import Repl
 import qualified Kitten.Compile as Compile
 import qualified Kitten.HTML as HTML
 import qualified Kitten.Infer.Config as Infer
-import qualified Kitten.SSA as SSA
+import qualified Kitten.SSA.Types as SSA
 import qualified Kitten.SSAToC as SSAToC
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as T

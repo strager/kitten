@@ -25,7 +25,7 @@ import Kitten.Util.List (unfoldToN)
 import Kitten.Util.Text (ToText(toText), showText)
 
 import qualified Kitten.Builtin as Builtin
-import qualified Kitten.SSA as SSA
+import qualified Kitten.SSA.Types as SSA
 import qualified Kitten.Util.Text as Text
 
 class Mangle a where
