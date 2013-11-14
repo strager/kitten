@@ -232,6 +232,7 @@ htmlspecialchars :: Text -> Text
 htmlspecialchars = Text.concatMap escape
   where
   escape '"' = "&quot;"
+  escape '\'' = "&apos;"
   escape '&' = "&amp;"
   escape '<' = "&lt;"
   escape '>' = "&gt;"
