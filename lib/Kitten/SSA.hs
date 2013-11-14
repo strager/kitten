@@ -245,18 +245,13 @@ functionPrelude arity = case arity of
   pushInput :: Int -> FunctionState ()
   pushInput index = pushVar $ Var index Parameter
 
--- TODO(strager): Use arity instead of 'pop'-like hacks.
-functionEpilogue :: RowArity form -> FunctionWriter ()
-functionEpilogue _arity = do
-  env <- liftState get
-  let returnValues = envDataStack env
-  liftState $ put env
-    { envDataStack = []
-    , envInferredOutputArity = length returnValues
-    }
-  tellInstruction $ Return
-    (V.reverse $ V.fromList returnValues)
-    UnknownLocation
+functionEpilogue :: RowArity Template -> FunctionWriter ()
+functionEpilogue arity = do
+  returnValues <- liftState $ popRow arity
+  dataStack <- liftState $ gets envDataStack
+  unless (null dataStack)
+    . error $ "Expected empty stack (did you break the type system?); got " ++ show dataStack
+  tellInstruction $ Return returnValues UnknownLocation
 
 setLocation :: Location -> FunctionWriter ()
 setLocation = liftGlobalState . put
@@ -340,7 +335,6 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     -}
     let type_ = _type
 
-    -- TODO(strager): Allow polymorphic arity.
     traceShow type_ (return())
     (inArity, outArity) <- liftState $ functionRowArity type_
     inputs <- liftState $ popRow inArity

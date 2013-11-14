@@ -424,7 +424,7 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
   SSA.Int value out loc -> mkVar out loc $ intToC value
   SSA.PairTerm a b out loc -> mkVar out loc
     $ functionCall (rt "pair") [toText a, toText b]
-  SSA.Return values loc
+  SSA.Return row loc
     -> locationComment loc <> "\n"
     <> "return" <> (case V.toList values of
       [] -> ""
@@ -435,6 +435,9 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
         <> commaSeparated (map toText xs)
         <> " } }")
     <> ";"
+    where
+    values :: Vector SSA.Var
+    values = scalarVars row
   SSA.Vector values out loc -> mkVar out loc
     $ vectorToC (V.map toText values)
   where

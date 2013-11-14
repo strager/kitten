@@ -195,7 +195,7 @@ data Instruction (form :: Form) where
     -> Instruction form
 
   Return
-    :: !(Vector Var)
+    :: !(RowVar form)
     -> !Location
     -> Instruction form
 
@@ -226,7 +226,7 @@ instance ToText (Instruction form) where
     Float value out _ -> bind out ["float", showText value]
     Int value out _ -> bind out ["int", showText value]
     PairTerm a b out _ -> bind out ["pair", showText a, showText b]
-    Return values _ -> "return " <> unwordsVector values
+    Return values _ -> "return " <> toText values
     Vector values out _ -> Text.unwords
       [ bind out ["vector"]
       , unwordsVector values
