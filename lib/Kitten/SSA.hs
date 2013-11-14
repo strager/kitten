@@ -182,16 +182,22 @@ instance ToText (RowArity form) where
   toText (RowTemplateArity var) = showText var
 
 data RowVar (form :: Form) where
-  RowVars :: !(Vector Var) -> RowVar form
-  RowTemplateVar :: !TemplateVar -> !Var -> RowVar Template
+  ScalarVars :: !(Vector Var) -> RowVar form
+  TemplateRowScalarVars
+    :: !TemplateVar    -- ^ Template row variable.
+    -> !Var            -- ^ N-ple of row values.
+    -> !(Vector Var)   -- ^ Extra scalars (like 'ScalarVars').
+    -> RowVar Template
 
 instance Show (RowVar form) where
   show = Text.unpack . toText
 
 instance ToText (RowVar form) where
-  toText (RowVars vars) = unwordsVector vars
-  toText (RowTemplateVar templateVar var)
-    = "<" <> toText templateVar <> ">" <> toText var
+  toText (ScalarVars scalars) = unwordsVector scalars
+  toText (TemplateRowScalarVars templateVar var scalars)
+    = Text.unwords
+    $ "<" <> toText templateVar <> ">" <> toText var
+    : map toText (V.toList scalars)
 
 -- | An SSA instruction.  Arguments are ordered input first,
 -- output last, except for 'Return'.
@@ -503,10 +509,10 @@ bindRow :: RowVar form -> [Text] -> Text
 bindRow row rest = toText row <> " <- " <> Text.unwords rest
 
 bind :: Var -> [Text] -> Text
-bind var = bindRow (RowVars (V.singleton var))
+bind var = bindRow (ScalarVars (V.singleton var))
 
 bindNone :: [Text] -> Text
-bindNone = bindRow (RowVars V.empty)
+bindNone = bindRow (ScalarVars V.empty)
 
 data Var = Var !Int !VarType
   deriving (Eq)
@@ -775,8 +781,8 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
         outputs <- lift . lift $ V.replicateM outArity push
         let funcName = GlobalFunctionName (defName fn)
         tellInstruction $ Call funcName
-          (RowVars (V.reverse inputs))
-          (RowVars outputs)
+          (ScalarVars (V.reverse inputs))
+          (ScalarVars outputs)
           loc
   Typed.Compose terms _loc _type -> V.mapM_ termToSSA terms
   Typed.From{} -> return ()
@@ -922,9 +928,9 @@ builtinToSSA theBuiltin loc type_ = do
   -- TODO(strager): Allow RowTemplateVar.
   pushInputs :: Int -> FunctionState (RowVar Template)
   pushInputs argsToDrop
-    = RowVars <$> V.replicateM (inputs - argsToDrop) pop
+    = ScalarVars <$> V.replicateM (inputs - argsToDrop) pop
   pushOutputs :: FunctionState (RowVar Template)
-  pushOutputs = RowVars <$> V.replicateM outputs push
+  pushOutputs = ScalarVars <$> V.replicateM outputs push
 
   err :: String -> a
   err m = error $ "Kitten.SSA.builtinToSSA: " ++ m
