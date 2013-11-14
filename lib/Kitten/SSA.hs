@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -30,6 +31,7 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Data.Vector as V
 
@@ -44,6 +46,7 @@ import Kitten.Typed (Typed, TypedDef)
 import Kitten.Util.Text (ToText(..), showText)
 
 import qualified Kitten.Builtin as Builtin
+import qualified Kitten.Kind as Type
 import qualified Kitten.Type as Type
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as Text
@@ -51,13 +54,13 @@ import qualified Kitten.Util.Text as Text
 data Form = Template | Normal
 
 data TemplateParameter
-  = RowParam
+  = RowParam !(Type.TypeName Type.Row)
 
 instance Show TemplateParameter where
   show = Text.unpack . toText
 
 instance ToText TemplateParameter where
-  toText RowParam = "row"
+  toText (RowParam var) = "row(" <> toText var <> ")"
 
 data TemplateArgument
   = RowArg !Int
@@ -89,12 +92,12 @@ instance ToText AFunction where
   toText (TemplateFunction f) = toText f
 
 data Function (form :: Form) where
-  Function
+  Function ::
     { funcInputs :: !(RowArity form)
     , funcOutputs :: !(RowArity form)
     , funcInstructions :: !(Vector (Instruction form))
 
-    , funcClosures :: !(Vector (Closure form))
+    , funcClosures :: !(Vector Closure)
     -- ^ Closures available only to this function.
 
     , funcTemplateParameters :: TemplateParameters form
@@ -102,17 +105,17 @@ data Function (form :: Form) where
     -- template.
 
     , funcLocation :: !Location
-    } :: Function form
+    } -> Function form
 
 data Definition = Definition
   { definitionName :: !GlobalFunctionName
   , definitionFunction :: !AFunction
   }
 
-data Closure (form :: Form) = Closure
+data Closure = Closure
   { closureClosed :: !Int
   -- ^ Number of variables capture by this closure.
-  , closureFunction :: !(Function form)
+  , closureFunction :: !AFunction
   }
 
 instance Show (Function form) where
@@ -132,6 +135,11 @@ vectorToLines = Text.unlines . vectorToTextList
 
 instance ToText (Function form) where
   toText = functionToText "<unknown>"
+
+afunctionToText :: Text -> AFunction -> Text
+afunctionToText name = \case
+  NormalFunction f -> functionToText name f
+  TemplateFunction f -> functionToText name f
 
 functionToText :: Text -> Function form -> Text
 functionToText name Function{..} = Text.unlines
@@ -153,7 +161,7 @@ functionToText name Function{..} = Text.unlines
     ]
   , Text.indent $ vectorToLines funcInstructions
   , Text.indent . Text.unlines . V.toList $ V.imap
-    (\index closure -> functionToText
+    (\index closure -> afunctionToText
       (toText (ClosureName index)) (closureFunction closure))
     funcClosures
   ]
@@ -541,7 +549,7 @@ data GlobalEnv = GlobalEnv
   }
 
 data FunctionEnv = FunctionEnv
-  { envClosures :: !(Vector (Closure Template))
+  { envClosures :: !(Vector Closure)
   , envDataIndex :: !Int
   , envDataStack :: ![Var]
   , envLocalIndex :: !Int
@@ -568,11 +576,14 @@ defaultFunctionEnv = FunctionEnv
 
 type GlobalState = StateT Location (Reader GlobalEnv)
 type FunctionState = StateT FunctionEnv GlobalState
-type FunctionWriter = WriterT (Vector (Instruction Template)) FunctionState
+type FunctionWriter
+  = WriterT (Vector (Instruction Template))
+    (WriterT (Vector TemplateParameter)
+      FunctionState)
 
 fragmentToSSA
   :: Fragment Typed
-  -> (Function Normal, [Definition])
+  -> (AFunction, [Definition])
 fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
   = flip runReader GlobalEnv { envDefs = fragmentDefs }
   . flip evalStateT UnknownLocation $ do
@@ -602,7 +613,7 @@ failure message = do
 
 funcFailure :: String -> FunctionWriter a
 funcFailure message = do
-  loc <- lift $ lift get
+  loc <- liftGlobalState get
   error $ message ++ " at " ++ show loc
 
 pop :: FunctionState Var
@@ -664,18 +675,56 @@ functionToSSA
   -> Location
   -> GlobalState AFunction
 functionToSSA term loc = do
-  (instructions, env) <- flip runStateT defaultFunctionEnv
-    . execWriterT $ do
+  ((instructions, templateParameters), env)
+    <- flip runStateT defaultFunctionEnv
+    . runWriterT . execWriterT $ do
       functionPrelude 0  -- FIXME(strager)
       termToSSA term
       functionEpilogue 0  -- FIXME(strager)
-  return Function
-    { funcInputs = envInferredInputArity env
-    , funcOutputs = envInferredOutputArity env
+
+  -- HACK(strager)
+  let
+    inputs = RowArity (envInferredInputArity env)
+    outputs = RowArity (envInferredOutputArity env)
+
+  return $ simplifyFunctionForm Function
+    { funcInputs = inputs
+    , funcOutputs = outputs
     , funcInstructions = instructions
     , funcClosures = envClosures env
+    , funcTemplateParameters = Parameters templateParameters
     , funcLocation = loc
     }
+
+simplifyFunctionForm :: Function Template -> AFunction
+simplifyFunctionForm function@Function{..}
+  = case funcTemplateParameters of
+    Parameters parameters | V.null parameters
+      -> NormalFunction $ castFunction function
+    _ -> TemplateFunction function
+
+castFunction :: Function Template -> Function Normal
+castFunction Function{..} = Function
+  -- NOTE(strager): GHC does not support type-changing GADT
+  -- record updates.
+  { funcInputs = castRowArity funcInputs
+  , funcOutputs = castRowArity funcOutputs
+  , funcInstructions = castInstructions funcInstructions
+  , funcClosures = funcClosures
+  , funcTemplateParameters = NoParameters
+  , funcLocation = funcLocation
+  }
+
+castRowArity :: RowArity Template -> RowArity Normal
+castRowArity = \case
+  RowArity arity -> RowArity arity
+  RowTemplateArity{} -> error "Kitten.SSA.castRowArity: Found RowTemplateArity"
+
+castInstructions
+  :: Vector (Instruction Template)
+  -> Vector (Instruction Normal)
+-- FIXME(strager): Should throw a runtime error upon failure.
+castInstructions = unsafeCoerce
 
 -- TODO(strager): Remove hacks in 'pop' and use this instead.
 functionPrelude :: Int -> FunctionWriter ()
@@ -684,18 +733,27 @@ functionPrelude _arity = return ()
 -- TODO(strager): Use arity instead of 'pop'-like hacks.
 functionEpilogue :: Int -> FunctionWriter ()
 functionEpilogue _arity = do
-  env <- lift get
+  env <- lift $ lift get
   let returnValues = envDataStack env
-  lift $ put env
+  lift . lift $ put env
     { envDataStack = []
     , envInferredOutputArity = length returnValues
     }
-  tell . V.singleton $ Return
+  tellInstruction $ Return
     (V.reverse $ V.fromList returnValues)
     UnknownLocation
 
 setLocation :: Location -> FunctionWriter ()
-setLocation = lift . lift . put
+setLocation = liftGlobalState . put
+
+tellInstruction :: Instruction Template -> FunctionWriter ()
+tellInstruction = tell . V.singleton
+
+liftState :: FunctionState a -> FunctionWriter a
+liftState = lift . lift
+
+liftGlobalState :: GlobalState a -> FunctionWriter a
+liftGlobalState = lift . lift . lift
 
 termToSSA :: Typed -> FunctionWriter ()
 termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
@@ -705,38 +763,42 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     -- either side of the function type, throwing off
     -- functionArity.  We therefore look up the type from
     -- the function's definition.
-    fn <- lift . lift $ lookUpFunction name
+    fn <- lift . lift . lift $ lookUpFunction name
     let type_ = Typed.typedType (Type.unScheme (defTerm fn))
 
+    -- TODO(strager): Allow polymorphic arity.
     case Type.functionArity type_ of
       Nothing -> funcFailure
         $ "Could not get arity of function " ++ show fn
       Just (inArity, outArity) -> do
-        inputs <- lift $ V.replicateM inArity pop
-        outputs <- lift $ V.replicateM outArity push
+        inputs <- lift . lift $ V.replicateM inArity pop
+        outputs <- lift . lift $ V.replicateM outArity push
         let funcName = GlobalFunctionName (defName fn)
-        tell . V.singleton $ Call funcName (V.reverse inputs) outputs loc
+        tellInstruction $ Call funcName
+          (RowVars (V.reverse inputs))
+          (RowVars outputs)
+          loc
   Typed.Compose terms _loc _type -> V.mapM_ termToSSA terms
   Typed.From{} -> return ()
   Typed.PairTerm a b loc _type -> do
-    aVar <- termToSSA a >> lift pop
-    bVar <- termToSSA b >> lift pop
-    pairVar <- lift push
-    tell . V.singleton $ PairTerm aVar bVar pairVar loc
+    aVar <- termToSSA a >> liftState pop
+    bVar <- termToSSA b >> liftState pop
+    pairVar <- liftState push
+    tellInstruction $ PairTerm aVar bVar pairVar loc
   Typed.Push value loc _type -> valueToSSA value loc
   Typed.Scoped term _loc _type -> do
-    var <- lift pop
-    lift $ pushLocalVar var
+    var <- liftState pop
+    liftState $ pushLocalVar var
     termToSSA term
-    poppedVar <- lift popLocal
+    poppedVar <- liftState popLocal
     unless (var == poppedVar)
-      . lift . lift . failure
+      . funcFailure
       $ "Local mismatch (pushed " ++ show var ++ " vs popped " ++ show poppedVar ++ ")"
   Typed.To{} -> return ()
   Typed.VectorTerm values loc _type -> do
-    vars <- V.mapM (\v -> termToSSA v >> lift pop) values
-    var <- lift push
-    tell . V.singleton $ Vector vars var loc
+    vars <- V.mapM (\v -> termToSSA v >> liftState pop) values
+    var <- liftState push
+    tellInstruction $ Vector vars var loc
 
 builtinToSSA
   :: Builtin
@@ -744,7 +806,7 @@ builtinToSSA
   -> Type Type.Scalar
   -> FunctionWriter ()
 builtinToSSA theBuiltin loc type_ = do
-  mbuiltin <- lift . maybe (return Nothing) (liftM Just) $ case theBuiltin of
+  mbuiltin <- getMaybeBuiltin $ case theBuiltin of
     Builtin.AddFloat       -> Just $ AddFloat       <$> pop <*> pop <*> push
     Builtin.AddInt         -> Just $ AddInt         <$> pop <*> pop <*> push
     Builtin.AddVector      -> Just $ AddVector      <$> pop <*> pop <*> push
@@ -808,46 +870,47 @@ builtinToSSA theBuiltin loc type_ = do
     Builtin.UnsafePurify11 -> Just $ UnsafePurify11 <$> pop <*> push
     Builtin.XorBool        -> Just $ XorBool        <$> pop <*> pop <*> push
     Builtin.XorInt         -> Just $ XorInt         <$> pop <*> pop <*> push
+    -- TODO(strager): Allow polymorphic builtins.
     Builtin.Apply -> Just $ Apply
       <$> pop
-      <*> V.replicateM inputs pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 0
+      <*> pushOutputs
     Builtin.Choice -> Just $ Choice
       <$> pop
       <*> pop
-      <*> V.replicateM (inputs - 1) pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 1
+      <*> pushOutputs
     Builtin.ChoiceElse -> Just $ ChoiceElse
       <$> pop
       <*> pop
       <*> pop
-      <*> V.replicateM (inputs - 1) pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 1
+      <*> pushOutputs
     Builtin.If -> Just $ If
       <$> pop
       <*> pop
-      <*> V.replicateM inputs pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 0
+      <*> pushOutputs
     Builtin.IfElse -> Just $ IfElse
       <$> pop
       <*> pop
       <*> pop
-      <*> V.replicateM inputs pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 0
+      <*> pushOutputs
     Builtin.Option -> Just $ Option
       <$> pop
       <*> pop
-      <*> V.replicateM (inputs - 1) pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 1
+      <*> pushOutputs
     Builtin.OptionElse -> Just $ OptionElse
       <$> pop
       <*> pop
       <*> pop
-      <*> V.replicateM inputs pop
-      <*> V.replicateM outputs push
+      <*> pushInputs 0
+      <*> pushOutputs
   case mbuiltin of
     Nothing -> return ()
-    Just builtin -> tell . V.singleton $ CallBuiltin builtin loc
+    Just builtin -> tellInstruction $ CallBuiltin builtin loc
   where
   inputs, outputs :: Int
   ~(~inputs, ~outputs) = case type_ of
@@ -855,10 +918,20 @@ builtinToSSA theBuiltin loc type_ = do
       -> fromMaybe (err $ "failed to get arity of type " ++ show functionType)
         $ Type.functionArity functionType
     _ -> err $ "failed to find function argument for builtin " ++ show theBuiltin ++ " in type " ++ show type_
+
+  -- TODO(strager): Allow RowTemplateVar.
+  pushInputs :: Int -> FunctionState (RowVar Template)
+  pushInputs argsToDrop
+    = RowVars <$> V.replicateM (inputs - argsToDrop) pop
+  pushOutputs :: FunctionState (RowVar Template)
+  pushOutputs = RowVars <$> V.replicateM outputs push
+
   err :: String -> a
   err m = error $ "Kitten.SSA.builtinToSSA: " ++ m
+  getMaybeBuiltin :: Maybe (FunctionState a) -> FunctionWriter (Maybe a)
+  getMaybeBuiltin = liftState . maybe (return Nothing) (liftM Just)
 
-addClosure :: Closure Template -> FunctionState ClosureName
+addClosure :: Closure -> FunctionState ClosureName
 addClosure closure = do
   index <- liftM V.length $ gets envClosures
   modify $ \env -> env { envClosures = envClosures env `V.snoc` closure }
@@ -871,39 +944,39 @@ valueToSSA
 valueToSSA theValue loc = case theValue of
   Typed.Bool value -> one $ Bool value
   Typed.Char value -> one $ Char value
-  Typed.Closed name -> lift . pushVar
+  Typed.Closed name -> liftState . pushVar
     $ Var (nameIndex name) Closed
   Typed.Closure closedNames term -> do
     closedVars <- V.forM closedNames $ \closed -> case closed of
-      ClosedName name -> lift $ getLocal name
+      ClosedName name -> liftState $ getLocal name
       ReclosedName name -> return $ Var (nameIndex name) Closed
-    func <- lift . lift $ functionToSSA term loc
+    func <- liftGlobalState $ functionToSSA term loc
     let
       closure = Closure
         { closureClosed = V.length closedVars
         , closureFunction = func
         }
-    name <- lift $ addClosure closure
-    var <- lift push
-    tell . V.singleton $ Activation name closedVars var loc
+    name <- liftState $ addClosure closure
+    var <- liftState push
+    tellInstruction $ Activation name closedVars var loc
   Typed.Float value -> one $ Float value
   Typed.Int value -> one $ Int value
   Typed.Local name -> do
-    local <- lift $ getLocal name
-    lift $ pushVar local
+    local <- liftState $ getLocal name
+    liftState $ pushVar local
   Typed.String value -> do
-    charVars <- mapM (\c -> one (Char c) >> lift pop)
+    charVars <- mapM (\c -> one (Char c) >> liftState pop)
       $ Text.unpack value
     one $ Vector (V.fromList charVars)
 
   Typed.Unit -> removeFromASTPlease "Unit"
   where
   one
-    :: (Var -> Location -> Instruction)
+    :: (Var -> Location -> Instruction Template)
     -> FunctionWriter ()
   one f = do
-    var <- lift push
-    tell . V.singleton $ f var loc
+    var <- liftState push
+    tellInstruction $ f var loc
 
   -- | FIXME(strager): Several Typed.Value AST
   -- constuctors should be removed, as they are only need
