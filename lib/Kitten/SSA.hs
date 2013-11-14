@@ -171,15 +171,19 @@ functionToText name Function{..} = Text.unlines
     = toText (TemplateVar i) <> ":" <> toText param
 
 data RowArity (form :: Form) where
-  RowArity :: !Int -> RowArity form
-  RowTemplateArity :: !TemplateVar -> RowArity Template
+  ScalarArity :: !Int -> RowArity form
+  TemplateArity
+    :: !TemplateVar  -- ^ Template row variable.
+    -> !Int          -- ^ Extra scalars (like 'ScalarArity').
+    -> RowArity Template
 
 instance Show (RowArity form) where
   show = Text.unpack . toText
 
 instance ToText (RowArity form) where
-  toText (RowArity arity) = showText arity
-  toText (RowTemplateArity var) = showText var
+  toText (ScalarArity arity) = showText arity
+  toText (TemplateArity var scalars)
+    = "<" <> toText var <> ">+" <> showText scalars
 
 data RowVar (form :: Form) where
   ScalarVars :: !(Vector Var) -> RowVar form
@@ -690,8 +694,8 @@ functionToSSA term loc = do
 
   -- HACK(strager)
   let
-    inputs = RowArity (envInferredInputArity env)
-    outputs = RowArity (envInferredOutputArity env)
+    inputs = ScalarArity (envInferredInputArity env)
+    outputs = ScalarArity (envInferredOutputArity env)
 
   return $ simplifyFunctionForm Function
     { funcInputs = inputs
@@ -723,8 +727,8 @@ castFunction Function{..} = Function
 
 castRowArity :: RowArity Template -> RowArity Normal
 castRowArity = \case
-  RowArity arity -> RowArity arity
-  RowTemplateArity{} -> error "Kitten.SSA.castRowArity: Found RowTemplateArity"
+  ScalarArity arity -> ScalarArity arity
+  TemplateArity{} -> error "Kitten.SSA.castRowArity: Found TemplateArity"
 
 castInstructions
   :: Vector (Instruction Template)
