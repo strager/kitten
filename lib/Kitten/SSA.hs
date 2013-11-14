@@ -16,9 +16,17 @@ module Kitten.SSA
   , Instruction(..)
   , Var(..)
   , VarType(..)
+  , Form(..)
+  , ADefinition(..)
+  , AFunction(..)
+  , RowArity(..)
+  , RowVar(..)
 
+  , adefinitionName
+  , afunctionToText
   , fragmentToSSA
   , functionToText
+  , adefinitionFunction
   ) where
 
 import Control.Applicative
@@ -62,8 +70,10 @@ instance Show TemplateParameter where
 instance ToText TemplateParameter where
   toText (RowParam var) = "row(" <> toText var <> ")"
 
+{-
 data TemplateArgument
   = RowArg !Int
+-}
 
 newtype TemplateVar = TemplateVar Int
 
@@ -107,9 +117,21 @@ data Function (form :: Form) where
     , funcLocation :: !Location
     } -> Function form
 
-data Definition = Definition
+data ADefinition
+  = NormalDefinition !(Definition Normal)
+  | TemplateDefinition !(Definition Template)
+
+adefinitionName :: ADefinition -> GlobalFunctionName
+adefinitionName (NormalDefinition def) = definitionName def
+adefinitionName (TemplateDefinition def) = definitionName def
+
+adefinitionFunction :: ADefinition -> AFunction
+adefinitionFunction (NormalDefinition def) = NormalFunction $ definitionFunction def
+adefinitionFunction (TemplateDefinition def) = TemplateFunction $ definitionFunction def
+
+data Definition (form :: Form) = Definition
   { definitionName :: !GlobalFunctionName
-  , definitionFunction :: !AFunction
+  , definitionFunction :: !(Function form)
   }
 
 data Closure = Closure
@@ -542,9 +564,11 @@ instance Show ClosureName where
 instance ToText ClosureName where
   toText (ClosureName index) = "c" <> showText index
 
+{-
 data FunctionRef
   = NormalRef !GlobalFunctionName
   | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
+-}
 
 newtype GlobalFunctionName = GlobalFunctionName Text
 
@@ -593,7 +617,7 @@ type FunctionWriter
 
 fragmentToSSA
   :: Fragment Typed
-  -> (AFunction, [Definition])
+  -> (AFunction, [ADefinition])
 fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
   = flip runReader GlobalEnv { envDefs = fragmentDefs }
   . flip evalStateT UnknownLocation $ do
@@ -605,10 +629,16 @@ fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
         loc = defLocation def
         term = Type.unScheme (defTerm def)
       ssa <- functionToSSA term loc
-      return Definition
-        { definitionName = GlobalFunctionName (defName def)
-        , definitionFunction = ssa
-        }
+      let name = GlobalFunctionName (defName def)
+      return $ case ssa of
+        NormalFunction f -> NormalDefinition Definition
+          { definitionName = name
+          , definitionFunction = f
+          }
+        TemplateFunction f -> TemplateDefinition Definition
+          { definitionName = name
+          , definitionFunction = f
+          }
     return (fragmentSSA, definitionSSAs)
 
 lookUpFunction :: Name -> GlobalState TypedDef

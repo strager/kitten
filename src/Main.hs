@@ -145,21 +145,29 @@ interpretAll entryPoints compileMode prelude config nameGen
         SSAMode -> case fragmentToSSA (prelude <> result) of
           (fragSSA, defSSAs) -> do
             forM_ defSSAs $ \def -> T.putStrLn
-              $ SSA.functionToText
-                (T.toText (SSA.definitionName def))
-                (SSA.definitionFunction def)
-            T.putStrLn $ SSA.functionToText "top-level" fragSSA
+              $ SSA.afunctionToText
+                (T.toText (SSA.adefinitionName def))
+                (SSA.adefinitionFunction def)
+            T.putStrLn $ SSA.afunctionToText "top-level" fragSSA
         CSourceMode -> case fragmentToSSA (prelude <> result) of
           (fragSSA, defSSAs) -> do
             T.putStrLn SSAToC.prelude
             let mainName = SSA.GlobalFunctionName "main"
 
-            mapM_ (T.putStrLn . ssaDefinitionToCProto) defSSAs
-            T.putStrLn $ ssaFunctionToCProto fragSSA mainName []
+            mapM_ (T.putStrLn . assaDefinitionToC) defSSAs
+            where
+              assaDefinitionToC :: SSA.ADefinition -> Text
+              assaDefinitionToC (SSA.NormalDefinition def)
+                = ssaDefinitionToC def
+              assaDefinitionToC (SSA.TemplateDefinition def)
+                = "TODO assaDefinitionToC " <> T.toText (SSA.definitionName def)
 
-            mapM_ (T.putStrLn . ssaDefinitionToC) defSSAs
-            T.putStrLn $ ssaFunctionToC fragSSA mainName
-            T.putStrLn $ SSAToC.main mainName
+            --mapM_ (T.putStrLn . ssaDefinitionToCProto) defSSAs
+            --T.putStrLn $ ssaFunctionToCProto fragSSA mainName []
+
+            --mapM_ (T.putStrLn . ssaDefinitionToC) defSSAs
+            --T.putStrLn $ ssaFunctionToC fragSSA mainName
+            --T.putStrLn $ SSAToC.main mainName
 
 parseArguments :: IO Arguments
 parseArguments = do

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -170,6 +171,18 @@ typeOfArity arity
   | arity == 1 = Just Value
   | otherwise = Just (Tuple arity)
 
+scalarArity :: SSA.RowArity SSA.Normal -> Int
+scalarArity (SSA.ScalarArity arity) = arity
+
+scalarVars :: SSA.RowVar SSA.Normal -> Vector SSA.Var
+scalarVars (SSA.ScalarVars vars) = vars
+
+scalarVarCount :: SSA.RowVar SSA.Normal -> Int
+scalarVarCount = V.length . scalarVars
+
+typeOfRowArity :: SSA.RowArity SSA.Normal -> Maybe TypeName
+typeOfRowArity = typeOfArity . scalarArity
+
 comment :: Text -> Text
 comment message = "/* " <> sanitize message <> " */"
   where
@@ -179,25 +192,25 @@ comment message = "/* " <> sanitize message <> " */"
 locationComment :: Location -> Text
 locationComment = comment . toText
 
-ssaDefinitionToC :: SSA.Definition -> Text
+ssaDefinitionToC :: SSA.Definition SSA.Normal -> Text
 ssaDefinitionToC def = ssaFunctionToC
   (SSA.definitionFunction def)
   (SSA.definitionName def)
 
-ssaDefinitionToCProto :: SSA.Definition -> Text
+ssaDefinitionToCProto :: SSA.Definition SSA.Normal -> Text
 ssaDefinitionToCProto def = ssaFunctionToCProto
   (SSA.definitionFunction def)
   (SSA.definitionName def)
   []
 
 ssaFunctionToC
-  :: SSA.Function
+  :: SSA.Function SSA.Normal
   -> SSA.GlobalFunctionName
   -> Text
 ssaFunctionToC func name = ssaFunctionToC' func name [] ""
 
 ssaFunctionToC'
-  :: SSA.Function
+  :: SSA.Function SSA.Normal
   -> SSA.GlobalFunctionName
   -> [SSA.ClosureName]
   -> Text -- ^ Prelude.
@@ -214,13 +227,14 @@ ssaFunctionToC' func globalName closureNames funcPrelude
     , "}\n"
     ]
   closures :: [Text]
-  closures = V.toList $ V.imap
-    (\index closure -> ssaFunctionToC'
-      (SSA.closureFunction closure)
-      globalName
+  closures = V.toList
+    $ V.imap closureToC (SSA.funcClosures func)
+  closureToC :: Int -> SSA.Closure -> Text
+  closureToC index closure = case SSA.closureFunction closure of
+    SSA.NormalFunction f -> ssaFunctionToC' f globalName
       (SSA.ClosureName index : closureNames)
-      (closurePrelude closure))
-    (SSA.funcClosures func)
+      (closurePrelude closure)
+    SSA.TemplateFunction _ -> "TODO closureToC"
   body :: Text
   body = Text.unlines . map
     (ssaInstructionToC globalName closureNames)
@@ -266,12 +280,12 @@ closureParameterTypesFromArity inputs
     : map mangle (replicate inputs Value)
 
 functionSignatureToC
-  :: SSA.Function
+  :: SSA.Function SSA.Normal
   -> SSA.GlobalFunctionName
   -> [SSA.ClosureName]
   -> Text
 functionSignatureToC SSA.Function{..} globalName closureNames
-  = signature (typeOfArity funcOutputs)
+  = signature (typeOfRowArity funcOutputs)
     (mangle $ FunctionName globalName closureNames)
     $ case closureNames of
       [] -> formalParameters
@@ -279,11 +293,11 @@ functionSignatureToC SSA.Function{..} globalName closureNames
         : formalParameters
   where
   formalParameters :: [Text]
-  formalParameters = reverse . unfoldToN funcInputs
+  formalParameters = reverse . unfoldToN (scalarArity funcInputs)
     $ \index -> typed Value (SSA.Var index SSA.Parameter)
 
 ssaFunctionToCProto
-  :: SSA.Function
+  :: SSA.Function SSA.Normal
   -> SSA.GlobalFunctionName
   -> [SSA.ClosureName]
   -> Text
@@ -294,12 +308,13 @@ ssaFunctionToCProto func globalName closureNames
   thisProto = functionSignatureToC
     func globalName closureNames <> ";"
   closureProtos :: [Text]
-  closureProtos = V.toList $ V.imap
-    (\index closure -> ssaFunctionToCProto
-      (SSA.closureFunction closure)
-      globalName
-      (SSA.ClosureName index : closureNames))
-    (SSA.funcClosures func)
+  closureProtos = V.toList
+    $ V.imap closureToCProto (SSA.funcClosures func)
+  closureToCProto :: Int -> SSA.Closure -> Text
+  closureToCProto index closure = case SSA.closureFunction closure of
+    SSA.NormalFunction f -> ssaFunctionToCProto f globalName
+      (SSA.ClosureName index : closureNames)
+    SSA.TemplateFunction _ -> "TODO closureToCProto"
 
 boolToC :: Bool -> Text
 boolToC True = functionCall (rt "true") []
@@ -373,10 +388,14 @@ declareVars vars value = case V.toList vars of
       = declareVar Value var
       $ Just (tmpVarName `valueAt` index)
 
+declareRowVars :: SSA.RowVar SSA.Normal -> Text -> Text
+declareRowVars rowVar expr
+  = declareVars (scalarVars rowVar) expr
+
 ssaInstructionToC
   :: SSA.GlobalFunctionName
   -> [SSA.ClosureName]
-  -> SSA.Instruction
+  -> SSA.Instruction SSA.Normal
   -> Text
 ssaInstructionToC globalName closureNames instruction = case instruction of
   SSA.Activation closureName vars out loc -> mkVar out loc
@@ -394,10 +413,10 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
   SSA.Char value out loc -> mkVar out loc $ charToC value
   SSA.Call name inputs outputs loc
     -> locationComment loc <> "\n"
-    <> declareVars outputs
+    <> declareRowVars outputs
       (functionCall
         (FunctionName name [])
-        (map toText (V.toList inputs)))
+        (map toText (V.toList (scalarVars inputs))))
   SSA.CallBuiltin builtinCall loc
     -> locationComment loc <> "\n"
     <> builtinCallToC builtinCall
@@ -424,7 +443,7 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
     = locationComment location <> "\n"
     <> declareVar Value output (Just value)
 
-builtinCallToC :: SSA.BuiltinCall -> Text
+builtinCallToC :: SSA.BuiltinCall SSA.Normal -> Text
 builtinCallToC builtinCall = case builtinCall of
   SSA.AddFloat a b out     -> mkVar out Builtin.AddFloat       [b, a]
   SSA.AddInt a b out       -> mkVar out Builtin.AddInt         [b, a]
@@ -490,64 +509,64 @@ builtinCallToC builtinCall = case builtinCall of
   SSA.XorInt a b out       -> mkVar out Builtin.XorInt         [b, a]
   SSA.Apply func inputs outputs
     -- def __apply (.r (.r -> .s +e) -> .s +e)
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_APPLY"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs)
       : mangle func
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.Choice leftFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_CHOICE"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs + 1)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs + 1)
       : mangle cond
       : mangle leftFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.ChoiceElse rightFunc leftFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_CHOICE_ELSE"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs + 1)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs + 1)
       : mangle cond
       : mangle leftFunc
       : mangle rightFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.If trueFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_IF"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs)
       : mangle cond
       : mangle trueFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.IfElse falseFunc trueFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_IF_ELSE"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs)
       : mangle cond
       : mangle trueFunc
       : mangle falseFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.Option someFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_OPTION"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs + 1)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs + 1)
       : mangle cond
       : mangle someFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   SSA.OptionElse noneFunc someFunc cond inputs outputs
-    -> declareVars outputs
+    -> declareRowVars outputs
       . macroCall "KTN_OPTION_ELSE"
-      $ closureReturnTypeFromArity (V.length outputs)
-      : closureParameterTypesFromArity (V.length inputs + 1)
-      : closureParameterTypesFromArity (V.length inputs + 0)
+      $ closureReturnTypeFromArity (scalarVarCount outputs)
+      : closureParameterTypesFromArity (scalarVarCount inputs + 1)
+      : closureParameterTypesFromArity (scalarVarCount inputs + 0)
       : mangle cond
       : mangle someFunc
       : mangle noneFunc
-      : map mangle (V.toList inputs)
+      : mangleRow inputs
   where
   mkVar :: SSA.Var -> Builtin -> [SSA.Var] -> Text
   mkVar output builtin arguments
@@ -557,3 +576,5 @@ builtinCallToC builtinCall = case builtinCall of
   call builtin arguments
     = functionCall (BuiltinName builtin) (map toText arguments)
     <> ";"
+  mangleRow :: SSA.RowVar SSA.Normal -> [Text]
+  mangleRow = map mangle . V.toList . scalarVars
