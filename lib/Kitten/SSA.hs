@@ -182,9 +182,11 @@ functionToSSA term loc = do
     <- traceShow (Typed.typedType term, loc)
     $ flip runStateT defaultFunctionEnv
     . execWriterT $ do
-      functionPrelude 0  -- FIXME(strager)
+      (inputArity, outputArity) <- liftState
+        $ functionRowArity (Typed.typedType term)
+      functionPrelude inputArity
       termToSSA term
-      functionEpilogue 0  -- FIXME(strager)
+      functionEpilogue outputArity
 
   -- HACK(strager)
   let
@@ -231,11 +233,15 @@ castInstructions
 castInstructions = unsafeCoerce
 
 -- TODO(strager): Remove hacks in 'pop' and use this instead.
-functionPrelude :: Int -> FunctionWriter ()
-functionPrelude _arity = return ()
+functionPrelude :: RowArity form -> FunctionWriter ()
+functionPrelude arity = case arity of
+  ScalarArity _scalars -> return ()
+  TemplateArity templateVar _scalars -> do
+    rowIndex <- liftState freshVarIndex
+    liftState . pushVar $ Var rowIndex (RowVar templateVar)
 
 -- TODO(strager): Use arity instead of 'pop'-like hacks.
-functionEpilogue :: Int -> FunctionWriter ()
+functionEpilogue :: RowArity form -> FunctionWriter ()
 functionEpilogue _arity = do
   env <- liftState get
   let returnValues = envDataStack env
@@ -274,9 +280,8 @@ popRow (ScalarArity scalars)
   = ScalarVars <$> V.replicateM scalars pop
 popRow (TemplateArity templateVar scalars) = do
   rowVar <- pop
-  -- TODO(strager): Initialize the stack with a row variable
-  -- (in functionToSSA), and assert here that 'rowVar' is
-  -- actually a 'RowVar' (with the same template variable).
+  -- TODO(strager): Assert here that 'rowVar' is actually a
+  -- 'RowVar' (with the same template variable).
   scalarVars <- V.replicateM scalars pop
   return $ TemplateRowScalarVars templateVar rowVar scalarVars
 
