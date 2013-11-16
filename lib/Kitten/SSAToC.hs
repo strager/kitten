@@ -53,7 +53,7 @@ instance Mangle TypeName where
 instance Mangle (Maybe TypeName) where
   mangle = maybe "void" mangle
 
-typed :: TypeName -> SSA.Var -> Text
+typed :: TypeName -> SSA.Var form -> Text
 typed typeName var = mangle typeName <> " " <> mangle var
 
 data RuntimeFunction = Raw !Text  -- TODO(strager)
@@ -161,7 +161,7 @@ instance Mangle Name where
     RuntimeName runtimeFunction -> case runtimeFunction of
       Raw x -> "ktn_" <> x
 
-instance Mangle SSA.Var where
+instance Mangle (SSA.Var form) where
   mangle = sanitizeIdentifier . toText
 
 typeOfArity :: Int -> Maybe TypeName
@@ -174,7 +174,7 @@ typeOfArity arity
 scalarArity :: SSA.RowArity SSA.Normal -> Int
 scalarArity (SSA.ScalarArity arity) = arity
 
-scalarVars :: SSA.RowVar SSA.Normal -> Vector SSA.Var
+scalarVars :: SSA.RowVar SSA.Normal -> Vector (SSA.Var SSA.Normal)
 scalarVars (SSA.ScalarVars vars) = vars
 
 scalarVarCount :: SSA.RowVar SSA.Normal -> Int
@@ -334,9 +334,9 @@ vectorToC xs = functionCall (rt "vector")
   $ showText (V.length xs) : V.toList xs
 
 declareVar
-  :: TypeName    -- ^ Type.
-  -> SSA.Var     -- ^ Name.
-  -> Maybe Text  -- ^ Value.
+  :: TypeName            -- ^ Type.
+  -> SSA.Var SSA.Normal  -- ^ Name.
+  -> Maybe Text          -- ^ Value.
   -> Text
 declareVar typeName name value
   = typed typeName name
@@ -368,8 +368,10 @@ macroCall name arguments
   = name <> "(" <> commaSeparated arguments <> ")"
 
 declareVars
-  :: Vector SSA.Var  -- ^ Variable names.
-  -> Text            -- ^ Expression returning zero or more values.
+  :: Vector (SSA.Var SSA.Normal)
+  -- ^ Variable names.
+  -> Text
+  -- ^ Expression returning zero or more values.
   -> Text
 declareVars vars value = case V.toList vars of
   [] -> value <> ";"
@@ -383,7 +385,7 @@ declareVars vars value = case V.toList vars of
     tmpVarName :: Text
     tmpVarName = Text.intercalate "_"
       $ map toText varList
-    extractValue :: Int -> SSA.Var -> Text
+    extractValue :: Int -> SSA.Var SSA.Normal -> Text
     extractValue index var
       = declareVar Value var
       $ Just (tmpVarName `valueAt` index)
@@ -436,12 +438,12 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
         <> " } }")
     <> ";"
     where
-    values :: Vector SSA.Var
+    values :: Vector (SSA.Var SSA.Normal)
     values = scalarVars row
   SSA.Vector values out loc -> mkVar out loc
     $ vectorToC (V.map toText values)
   where
-  mkVar :: SSA.Var -> Location -> Text -> Text
+  mkVar :: SSA.Var SSA.Normal -> Location -> Text -> Text
   mkVar output location value
     = locationComment location <> "\n"
     <> declareVar Value output (Just value)
@@ -571,11 +573,11 @@ builtinCallToC builtinCall = case builtinCall of
       : mangle noneFunc
       : mangleRow inputs
   where
-  mkVar :: SSA.Var -> Builtin -> [SSA.Var] -> Text
+  mkVar :: SSA.Var SSA.Normal -> Builtin -> [SSA.Var SSA.Normal] -> Text
   mkVar output builtin arguments
     = declareVar Value output . Just
     $ functionCall (BuiltinName builtin) (map toText arguments)
-  call :: Builtin -> [SSA.Var] -> Text
+  call :: Builtin -> [SSA.Var SSA.Normal] -> Text
   call builtin arguments
     = functionCall (BuiltinName builtin) (map toText arguments)
     <> ";"

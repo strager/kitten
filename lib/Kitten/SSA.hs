@@ -45,9 +45,9 @@ data GlobalEnv = GlobalEnv
 data FunctionEnv = FunctionEnv
   { envClosures :: !(Vector Closure)
   , envDataIndex :: !Int
-  , envDataStack :: ![Var]
+  , envDataStack :: ![Var Template]
   , envLocalIndex :: !Int
-  , envLocalStack :: ![Var]
+  , envLocalStack :: ![Var Template]
   , envTemplateParameters :: Vector TemplateParameter
 
   -- HACK(strager)
@@ -116,7 +116,14 @@ funcFailure message = do
   loc <- liftGlobalState get
   error $ message ++ " at " ++ show loc
 
-pop :: FunctionState Var
+popNormal :: FunctionState (Var Normal)
+popNormal = do
+  var <- pop
+  case var of
+    Var _ (RowVar{}) -> error "Popped a template variable but expected a normal variable"
+    Var _ _ -> error "TODO popNormal"{-return var-}
+
+pop :: FunctionState (Var Template)
 pop = do
   env <- get
   case envDataStack env of
@@ -143,18 +150,24 @@ freshVarIndex = do
   put env { envDataIndex = envDataIndex + 1 }
   return envDataIndex
 
-push :: FunctionState Var
-push = do
+pushNormal :: FunctionState (Var Normal)
+pushNormal = do
   index <- freshVarIndex
   let var = Var index Data
   pushVar var
   return var
 
-pushVar :: Var -> FunctionState ()
-pushVar var = modify $ \env -> env
-  { envDataStack = var : envDataStack env }
+push :: FunctionState (Var Template)
+push = do
+  var <- pushNormal
+  case var of
+    Var _ _ -> error "TODO push"{-return var-}
 
-popLocal :: FunctionState Var
+pushVar :: Var form -> FunctionState ()
+pushVar _var = modify $ \env -> env
+  { envDataStack = error "TODO pushVar"{-_var-} : envDataStack env }
+
+popLocal :: FunctionState (Var Template)
 popLocal = do
   env <- get
   case envLocalStack env of
@@ -163,12 +176,12 @@ popLocal = do
       put env { envLocalStack = xs }
       return x
 
-getLocal :: Name -> FunctionState Var
+getLocal :: Name -> FunctionState (Var Template)
 getLocal name = do
   localStack <- gets envLocalStack
   return $ localStack !! nameIndex name
 
-pushLocalVar :: Var -> FunctionState ()
+pushLocalVar :: Var Template -> FunctionState ()
 pushLocalVar var = modify $ \env -> env
   { envLocalStack = var : envLocalStack env }
 
@@ -275,7 +288,7 @@ liftState = lift
 liftGlobalState :: GlobalState a -> FunctionWriter a
 liftGlobalState = lift . lift
 
-popRow :: RowArity form -> FunctionState (RowVar form)
+popRow :: RowArity Template -> FunctionState (RowVar Template)
 popRow (ScalarArity scalars)
   = ScalarVars <$> V.replicateM scalars pop
 popRow (TemplateArity templateVar scalars) = do
@@ -285,7 +298,7 @@ popRow (TemplateArity templateVar scalars) = do
   scalarVars <- V.replicateM scalars pop
   return $ TemplateRowScalarVars templateVar rowVar scalarVars
 
-pushRow :: RowArity form -> FunctionState (RowVar form)
+pushRow :: RowArity Template -> FunctionState (RowVar Template)
 pushRow (ScalarArity scalars)
   = ScalarVars <$> V.replicateM scalars push
 pushRow (TemplateArity templateVar scalars) = do
@@ -344,9 +357,9 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
   Typed.Compose terms _loc _type -> V.mapM_ termToSSA terms
   Typed.From{} -> return ()
   Typed.PairTerm a b loc _type -> do
-    aVar <- termToSSA a >> liftState pop
-    bVar <- termToSSA b >> liftState pop
-    pairVar <- liftState push
+    aVar <- termToSSA a >> liftState popNormal
+    bVar <- termToSSA b >> liftState popNormal
+    pairVar <- liftState pushNormal
     tellInstruction $ PairTerm aVar bVar pairVar loc
   Typed.Push value loc _type -> valueToSSA value loc
   Typed.Scoped term _loc _type -> do
@@ -359,8 +372,8 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
       $ "Local mismatch (pushed " ++ show var ++ " vs popped " ++ show poppedVar ++ ")"
   Typed.To{} -> return ()
   Typed.VectorTerm values loc _type -> do
-    vars <- V.mapM (\v -> termToSSA v >> liftState pop) values
-    var <- liftState push
+    vars <- V.mapM (\v -> termToSSA v >> liftState popNormal) values
+    var <- liftState pushNormal
     tellInstruction $ Vector vars var loc
 
 builtinToSSA
@@ -370,92 +383,92 @@ builtinToSSA
   -> FunctionWriter ()
 builtinToSSA theBuiltin loc type_ = do
   mbuiltin <- getMaybeBuiltin $ case theBuiltin of
-    Builtin.AddFloat       -> Just $ AddFloat       <$> pop <*> pop <*> push
-    Builtin.AddInt         -> Just $ AddInt         <$> pop <*> pop <*> push
-    Builtin.AddVector      -> Just $ AddVector      <$> pop <*> pop <*> push
-    Builtin.AndBool        -> Just $ AndBool        <$> pop <*> pop <*> push
-    Builtin.AndInt         -> Just $ AndInt         <$> pop <*> pop <*> push
-    Builtin.CharToInt      -> Just $ CharToInt      <$> pop <*> push
-    Builtin.Close          -> Just $ Close          <$> pop
-    Builtin.DivFloat       -> Just $ DivFloat       <$> pop <*> pop <*> push
-    Builtin.DivInt         -> Just $ DivInt         <$> pop <*> pop <*> push
-    Builtin.EqFloat        -> Just $ EqFloat        <$> pop <*> pop <*> push
-    Builtin.EqInt          -> Just $ EqInt          <$> pop <*> pop <*> push
-    Builtin.Exit           -> Just $ Exit           <$> pop
-    Builtin.First          -> Just $ First          <$> pop <*> push
-    Builtin.FromLeft       -> Just $ FromLeft       <$> pop <*> push
-    Builtin.FromRight      -> Just $ FromRight      <$> pop <*> push
-    Builtin.FromSome       -> Just $ FromSome       <$> pop <*> push
-    Builtin.GeFloat        -> Just $ GeFloat        <$> pop <*> pop <*> push
-    Builtin.GeInt          -> Just $ GeInt          <$> pop <*> pop <*> push
-    Builtin.Get            -> Just $ Get            <$> pop <*> pop <*> push
-    Builtin.GetLine        -> Just $ GetLine        <$> pop <*> push
-    Builtin.GtFloat        -> Just $ GtFloat        <$> pop <*> pop <*> push
-    Builtin.GtInt          -> Just $ GtInt          <$> pop <*> pop <*> push
+    Builtin.AddFloat       -> Just $ AddFloat       <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.AddInt         -> Just $ AddInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.AddVector      -> Just $ AddVector      <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.AndBool        -> Just $ AndBool        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.AndInt         -> Just $ AndInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.CharToInt      -> Just $ CharToInt      <$> popNormal <*> pushNormal
+    Builtin.Close          -> Just $ Close          <$> popNormal
+    Builtin.DivFloat       -> Just $ DivFloat       <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.DivInt         -> Just $ DivInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.EqFloat        -> Just $ EqFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.EqInt          -> Just $ EqInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Exit           -> Just $ Exit           <$> popNormal
+    Builtin.First          -> Just $ First          <$> popNormal <*> pushNormal
+    Builtin.FromLeft       -> Just $ FromLeft       <$> popNormal <*> pushNormal
+    Builtin.FromRight      -> Just $ FromRight      <$> popNormal <*> pushNormal
+    Builtin.FromSome       -> Just $ FromSome       <$> popNormal <*> pushNormal
+    Builtin.GeFloat        -> Just $ GeFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.GeInt          -> Just $ GeInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Get            -> Just $ Get            <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.GetLine        -> Just $ GetLine        <$> popNormal <*> pushNormal
+    Builtin.GtFloat        -> Just $ GtFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.GtInt          -> Just $ GtInt          <$> popNormal <*> popNormal <*> pushNormal
     Builtin.Impure         -> Nothing
-    Builtin.Init           -> Just $ Init           <$> pop <*> push
-    Builtin.IntToChar      -> Just $ IntToChar      <$> pop <*> push
-    Builtin.LeFloat        -> Just $ LeFloat        <$> pop <*> pop <*> push
-    Builtin.LeInt          -> Just $ LeInt          <$> pop <*> pop <*> push
-    Builtin.Left           -> Just $ MakeLeft       <$> pop <*> push
-    Builtin.Length         -> Just $ Length         <$> pop <*> push
-    Builtin.LtFloat        -> Just $ LtFloat        <$> pop <*> pop <*> push
-    Builtin.LtInt          -> Just $ LtInt          <$> pop <*> pop <*> push
-    Builtin.ModFloat       -> Just $ ModFloat       <$> pop <*> pop <*> push
-    Builtin.ModInt         -> Just $ ModInt         <$> pop <*> pop <*> push
-    Builtin.MulFloat       -> Just $ MulFloat       <$> pop <*> pop <*> push
-    Builtin.MulInt         -> Just $ MulInt         <$> pop <*> pop <*> push
-    Builtin.NeFloat        -> Just $ NeFloat        <$> pop <*> pop <*> push
-    Builtin.NeInt          -> Just $ NeInt          <$> pop <*> pop <*> push
-    Builtin.NegFloat       -> Just $ NegFloat       <$> pop <*> push
-    Builtin.NegInt         -> Just $ NegInt         <$> pop <*> push
-    Builtin.None           -> Just $ None           <$> push
-    Builtin.NotBool        -> Just $ NotBool        <$> pop <*> push
-    Builtin.NotInt         -> Just $ NotInt         <$> pop <*> push
-    Builtin.OpenIn         -> Just $ OpenIn         <$> push
-    Builtin.OpenOut        -> Just $ OpenOut        <$> push
-    Builtin.OrBool         -> Just $ OrBool         <$> pop <*> pop <*> push
-    Builtin.OrInt          -> Just $ OrInt          <$> pop <*> pop <*> push
-    Builtin.Pair           -> Just $ Pair           <$> pop <*> pop <*> push
-    Builtin.Print          -> Just $ Print          <$> pop <*> pop
-    Builtin.Rest           -> Just $ Rest           <$> pop <*> push
-    Builtin.Right          -> Just $ MakeRight      <$> pop <*> push
-    Builtin.Set            -> Just $ Set            <$> pop <*> pop <*> pop <*> push
-    Builtin.ShowFloat      -> Just $ ShowFloat      <$> pop <*> push
-    Builtin.ShowInt        -> Just $ ShowInt        <$> pop <*> push
-    Builtin.Some           -> Just $ Some           <$> pop <*> push
-    Builtin.Stderr         -> Just $ Stderr         <$> push
-    Builtin.Stdin          -> Just $ Stdin          <$> push
-    Builtin.Stdout         -> Just $ Stdout         <$> push
-    Builtin.SubFloat       -> Just $ SubFloat       <$> pop <*> pop <*> push
-    Builtin.SubInt         -> Just $ SubInt         <$> pop <*> pop <*> push
-    Builtin.Tail           -> Just $ Tail           <$> pop <*> push
-    Builtin.UnsafePurify11 -> Just $ UnsafePurify11 <$> pop <*> push
-    Builtin.XorBool        -> Just $ XorBool        <$> pop <*> pop <*> push
-    Builtin.XorInt         -> Just $ XorInt         <$> pop <*> pop <*> push
+    Builtin.Init           -> Just $ Init           <$> popNormal <*> pushNormal
+    Builtin.IntToChar      -> Just $ IntToChar      <$> popNormal <*> pushNormal
+    Builtin.LeFloat        -> Just $ LeFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.LeInt          -> Just $ LeInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Left           -> Just $ MakeLeft       <$> popNormal <*> pushNormal
+    Builtin.Length         -> Just $ Length         <$> popNormal <*> pushNormal
+    Builtin.LtFloat        -> Just $ LtFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.LtInt          -> Just $ LtInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.ModFloat       -> Just $ ModFloat       <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.ModInt         -> Just $ ModInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.MulFloat       -> Just $ MulFloat       <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.MulInt         -> Just $ MulInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.NeFloat        -> Just $ NeFloat        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.NeInt          -> Just $ NeInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.NegFloat       -> Just $ NegFloat       <$> popNormal <*> pushNormal
+    Builtin.NegInt         -> Just $ NegInt         <$> popNormal <*> pushNormal
+    Builtin.None           -> Just $ None           <$> pushNormal
+    Builtin.NotBool        -> Just $ NotBool        <$> popNormal <*> pushNormal
+    Builtin.NotInt         -> Just $ NotInt         <$> popNormal <*> pushNormal
+    Builtin.OpenIn         -> Just $ OpenIn         <$> pushNormal
+    Builtin.OpenOut        -> Just $ OpenOut        <$> pushNormal
+    Builtin.OrBool         -> Just $ OrBool         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.OrInt          -> Just $ OrInt          <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Pair           -> Just $ Pair           <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Print          -> Just $ Print          <$> popNormal <*> popNormal
+    Builtin.Rest           -> Just $ Rest           <$> popNormal <*> pushNormal
+    Builtin.Right          -> Just $ MakeRight      <$> popNormal <*> pushNormal
+    Builtin.Set            -> Just $ Set            <$> popNormal <*> popNormal <*> popNormal <*> pushNormal
+    Builtin.ShowFloat      -> Just $ ShowFloat      <$> popNormal <*> pushNormal
+    Builtin.ShowInt        -> Just $ ShowInt        <$> popNormal <*> pushNormal
+    Builtin.Some           -> Just $ Some           <$> popNormal <*> pushNormal
+    Builtin.Stderr         -> Just $ Stderr         <$> pushNormal
+    Builtin.Stdin          -> Just $ Stdin          <$> pushNormal
+    Builtin.Stdout         -> Just $ Stdout         <$> pushNormal
+    Builtin.SubFloat       -> Just $ SubFloat       <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.SubInt         -> Just $ SubInt         <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.Tail           -> Just $ Tail           <$> popNormal <*> pushNormal
+    Builtin.UnsafePurify11 -> Just $ UnsafePurify11 <$> popNormal <*> pushNormal
+    Builtin.XorBool        -> Just $ XorBool        <$> popNormal <*> popNormal <*> pushNormal
+    Builtin.XorInt         -> Just $ XorInt         <$> popNormal <*> popNormal <*> pushNormal
     Builtin.Apply -> Just . rowPolymorphic 0 $ Apply
-      <$> pop
+      <$> popNormal
     Builtin.Choice -> Just . rowPolymorphic 1 $ Choice
-      <$> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
     Builtin.ChoiceElse -> Just . rowPolymorphic 1 $ ChoiceElse
-      <$> pop
-      <*> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
+      <*> popNormal
     Builtin.If -> Just . rowPolymorphic 0 $ If
-      <$> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
     Builtin.IfElse -> Just . rowPolymorphic 0 $ IfElse
-      <$> pop
-      <*> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
+      <*> popNormal
     Builtin.Option -> Just . rowPolymorphic 1 $ Option
-      <$> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
     Builtin.OptionElse -> Just . rowPolymorphic 0 $ OptionElse
-      <$> pop
-      <*> pop
-      <*> pop
+      <$> popNormal
+      <*> popNormal
+      <*> popNormal
   case mbuiltin of
     Nothing -> return ()
     Just builtin -> tellInstruction $ CallBuiltin builtin loc
@@ -503,7 +516,7 @@ valueToSSA theValue loc = case theValue of
         , closureFunction = func
         }
     name <- liftState $ addClosure closure
-    var <- liftState push
+    var <- liftState pushNormal
     tellInstruction $ Activation name closedVars var loc
   Typed.Float value -> one $ Float value
   Typed.Int value -> one $ Int value
@@ -511,17 +524,17 @@ valueToSSA theValue loc = case theValue of
     local <- liftState $ getLocal name
     liftState $ pushVar local
   Typed.String value -> do
-    charVars <- mapM (\c -> one (Char c) >> liftState pop)
+    charVars <- mapM (\c -> one (Char c) >> liftState popNormal)
       $ Text.unpack value
     one $ Vector (V.fromList charVars)
 
   Typed.Unit -> removeFromASTPlease "Unit"
   where
   one
-    :: (Var -> Location -> Instruction Template)
+    :: (Var Normal -> Location -> Instruction Template)
     -> FunctionWriter ()
   one f = do
-    var <- liftState push
+    var <- liftState pushNormal
     tellInstruction $ f var loc
 
   -- | FIXME(strager): Several Typed.Value AST

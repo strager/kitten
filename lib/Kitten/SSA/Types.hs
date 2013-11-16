@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Kitten.SSA.Types
   ( ADefinition(..)
@@ -146,20 +147,20 @@ data Closure = Closure
 data Instruction (form :: Form) where
   Activation
     :: !ClosureName
-    -> !(Vector Var)     -- ^ Captured variables.
-    -> !Var
+    -> !(Vector (Var form))     -- ^ Captured variables.
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
   Bool
     :: !Bool
-    -> !Var
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
   Char
     :: !Char
-    -> !Var
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
@@ -177,20 +178,20 @@ data Instruction (form :: Form) where
 
   Float
     :: !Double
-    -> !Var
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
   Int
     :: !Int
-    -> !Var
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
   PairTerm
-    :: !Var
-    -> !Var
-    -> !Var
+    :: !(Var Normal)
+    -> !(Var Normal)
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
@@ -200,8 +201,8 @@ data Instruction (form :: Form) where
     -> Instruction form
 
   Vector
-    :: !(Vector Var)
-    -> !Var
+    :: !(Vector (Var Normal))
+    -> !(Var Normal)
     -> !Location
     -> Instruction form
 
@@ -233,116 +234,116 @@ instance ToText (Instruction form) where
       ]
 
 data BuiltinCall (form :: Form) where
-  AddFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
-  AddInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  AddVector      :: !Var -> !Var -> !Var -> BuiltinCall form
-  AndBool        :: !Var -> !Var -> !Var -> BuiltinCall form
-  AndInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  CharToInt      :: !Var -> !Var -> BuiltinCall form
-  Close          :: !Var -> BuiltinCall form
-  DivFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
-  DivInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  EqFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  EqInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  Exit           :: !Var -> BuiltinCall form
-  First          :: !Var -> !Var -> BuiltinCall form
-  FromLeft       :: !Var -> !Var -> BuiltinCall form
-  FromRight      :: !Var -> !Var -> BuiltinCall form
-  FromSome       :: !Var -> !Var -> BuiltinCall form
-  GeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  GeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  Get            :: !Var -> !Var -> !Var -> BuiltinCall form
-  GetLine        :: !Var -> !Var -> BuiltinCall form
-  GtFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  GtInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  Init           :: !Var -> !Var -> BuiltinCall form
-  IntToChar      :: !Var -> !Var -> BuiltinCall form
-  LeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  LeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  Length         :: !Var -> !Var -> BuiltinCall form
-  LtFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  LtInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  MakeLeft       :: !Var -> !Var -> BuiltinCall form
-  MakeRight      :: !Var -> !Var -> BuiltinCall form
-  ModFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
-  ModInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  MulFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
-  MulInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  NeFloat        :: !Var -> !Var -> !Var -> BuiltinCall form
-  NeInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  NegFloat       :: !Var -> !Var -> BuiltinCall form
-  NegInt         :: !Var -> !Var -> BuiltinCall form
-  None           :: !Var -> BuiltinCall form
-  NotBool        :: !Var -> !Var -> BuiltinCall form
-  NotInt         :: !Var -> !Var -> BuiltinCall form
-  OpenIn         :: !Var -> BuiltinCall form
-  OpenOut        :: !Var -> BuiltinCall form
-  OrBool         :: !Var -> !Var -> !Var -> BuiltinCall form
-  OrInt          :: !Var -> !Var -> !Var -> BuiltinCall form
-  Pair           :: !Var -> !Var -> !Var -> BuiltinCall form
-  Print          :: !Var -> !Var -> BuiltinCall form
-  Rest           :: !Var -> !Var -> BuiltinCall form
-  Set            :: !Var -> !Var -> !Var -> !Var -> BuiltinCall form
-  ShowFloat      :: !Var -> !Var -> BuiltinCall form
-  ShowInt        :: !Var -> !Var -> BuiltinCall form
-  Some           :: !Var -> !Var -> BuiltinCall form
-  Stderr         :: !Var -> BuiltinCall form
-  Stdin          :: !Var -> BuiltinCall form
-  Stdout         :: !Var -> BuiltinCall form
-  SubFloat       :: !Var -> !Var -> !Var -> BuiltinCall form
-  SubInt         :: !Var -> !Var -> !Var -> BuiltinCall form
-  Tail           :: !Var -> !Var -> BuiltinCall form
-  UnsafePurify11 :: !Var -> !Var -> BuiltinCall form
-  XorBool        :: !Var -> !Var -> !Var -> BuiltinCall form
-  XorInt         :: !Var -> !Var -> !Var -> BuiltinCall form
+  AddFloat       :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  AddInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  AddVector      :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  AndBool        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  AndInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  CharToInt      :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Close          :: !(Var Normal) -> BuiltinCall form
+  DivFloat       :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  DivInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  EqFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  EqInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Exit           :: !(Var Normal) -> BuiltinCall form
+  First          :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  FromLeft       :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  FromRight      :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  FromSome       :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  GeFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  GeInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Get            :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  GetLine        :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  GtFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  GtInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Init           :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  IntToChar      :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  LeFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  LeInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Length         :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  LtFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  LtInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  MakeLeft       :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  MakeRight      :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  ModFloat       :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  ModInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  MulFloat       :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  MulInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  NeFloat        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  NeInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  NegFloat       :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  NegInt         :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  None           :: !(Var Normal) -> BuiltinCall form
+  NotBool        :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  NotInt         :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  OpenIn         :: !(Var Normal) -> BuiltinCall form
+  OpenOut        :: !(Var Normal) -> BuiltinCall form
+  OrBool         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  OrInt          :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Pair           :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Print          :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Rest           :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Set            :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  ShowFloat      :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  ShowInt        :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Some           :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Stderr         :: !(Var Normal) -> BuiltinCall form
+  Stdin          :: !(Var Normal) -> BuiltinCall form
+  Stdout         :: !(Var Normal) -> BuiltinCall form
+  SubFloat       :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  SubInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  Tail           :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  UnsafePurify11 :: !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  XorBool        :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
+  XorInt         :: !(Var Normal) -> !(Var Normal) -> !(Var Normal) -> BuiltinCall form
 
   Apply
-    :: !Var              -- ^ Activation.
+    :: !(Var Normal)     -- ^ Activation.
     -> !(RowVar form)    -- ^ Inputs.
     -> !(RowVar form)    -- ^ Outputs.
     -> BuiltinCall form
 
   Choice
-    :: !Var              -- ^ Left activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ Left activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
 
   ChoiceElse
-    :: !Var              -- ^ Right activation.
-    -> !Var              -- ^ Left activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ Right activation.
+    -> !(Var Normal)     -- ^ Left activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
 
   If
-    :: !Var              -- ^ Truthy activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ Truthy activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
 
   IfElse
-    :: !Var              -- ^ Falsy activation.
-    -> !Var              -- ^ Truthy activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ Falsy activation.
+    -> !(Var Normal)     -- ^ Truthy activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
 
   Option
-    :: !Var              -- ^ Some activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ Some activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
 
   OptionElse
-    :: !Var              -- ^ None activation.
-    -> !Var              -- ^ Some activation.
-    -> !Var              -- ^ Condition.
+    :: !(Var Normal)     -- ^ None activation.
+    -> !(Var Normal)     -- ^ Some activation.
+    -> !(Var Normal)     -- ^ Condition.
     -> !(RowVar form)    -- ^ Extra inputs.
     -> !(RowVar form)    -- ^ Extra outputs.
     -> BuiltinCall form
@@ -448,21 +449,28 @@ instance ToText (BuiltinCall form) where
         ]
 
 -- TODO(strager): Make variable index a newtype.
-data Var = Var !Int !VarType
-  deriving (Eq)
+data Var (form :: Form) where
+  Var :: !Int -> !(VarType form) -> Var form
 
-instance Show Var where
+deriving instance Eq (Var form)
+
+instance Show (Var form) where
   show = Text.unpack . toText
 
-instance ToText Var where
+instance ToText (Var form) where
   toText (Var index Closed) = "k" <> showText index
   toText (Var index Data) = "s" <> showText index
   toText (Var index Parameter) = "p" <> showText index
   toText (Var index (RowVar t))
     = "<" <> toText t <> ">r" <> showText index
 
-data VarType = Closed | Data | Parameter | RowVar !TemplateVar
-  deriving (Eq)
+data VarType (form :: Form) where
+  Closed :: VarType form
+  Data :: VarType form
+  Parameter :: VarType form
+  RowVar :: !TemplateVar -> VarType Template
+
+deriving instance Eq (VarType form)
 
 -- * Rows.
 
@@ -482,11 +490,11 @@ instance ToText (RowArity form) where
     = "<" <> toText var <> ">+" <> showText scalars
 
 data RowVar (form :: Form) where
-  ScalarVars :: !(Vector Var) -> RowVar form
+  ScalarVars :: !(Vector (Var form)) -> RowVar form
   TemplateRowScalarVars
-    :: !TemplateVar    -- ^ Template row variable.
-    -> !Var            -- ^ N-ple of row values.
-    -> !(Vector Var)   -- ^ Extra scalars (like 'ScalarVars').
+    :: !TemplateVar              -- ^ Template row variable.
+    -> !(Var form)               -- ^ N-ple of row values.
+    -> !(Vector (Var Template))  -- ^ Extra scalars (like 'ScalarVars').
     -> RowVar Template
 
 instance Show (RowVar form) where
@@ -567,9 +575,8 @@ afunctionToText name = \case
 bindRow :: RowVar form -> [Text] -> Text
 bindRow row rest = toText row <> " <- " <> Text.unwords rest
 
-bind :: Var -> [Text] -> Text
+bind :: Var form -> [Text] -> Text
 bind var = bindRow (ScalarVars (V.singleton var))
 
 bindNone :: [Text] -> Text
 bindNone = bindRow (ScalarVars V.empty)
-
