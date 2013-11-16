@@ -110,6 +110,11 @@ failure message = do
   loc <- get
   error $ message ++ " at " ++ show loc
 
+funcFailure' :: String -> FunctionState a
+funcFailure' message = do
+  loc <- lift get
+  error $ message ++ " at " ++ show loc
+
 funcFailure :: String -> FunctionWriter a
 funcFailure message = do
   loc <- liftGlobalState get
@@ -119,7 +124,7 @@ popNormal :: FunctionState (Var Normal)
 popNormal = do
   var <- pop
   case downcast var of
-    Nothing -> error "Popped a template variable but expected a normal variable"
+    Nothing -> funcFailure' $ "Popped a template variable but expected a normal variable: " ++ show var
     Just v -> return v
 
 pop :: FunctionState (Var Template)
@@ -155,9 +160,6 @@ pushNormal = do
   let var = Var index Data
   pushVar var
   return var
-
-push :: FunctionState (Var Template)
-push = upcast <$> pushNormal
 
 pushVar :: Var form -> FunctionState ()
 pushVar var = modify $ \env -> env
@@ -264,24 +266,30 @@ liftGlobalState :: GlobalState a -> FunctionWriter a
 liftGlobalState = lift . lift
 
 popRow :: RowArity Template -> FunctionState (RowVar Template)
-popRow (ScalarArity scalars)
-  = ScalarVars <$> V.replicateM scalars pop
-popRow (TemplateArity templateVar scalars) = do
-  rowVar <- pop
-  -- TODO(strager): Assert here that 'rowVar' is actually a
-  -- 'RowVar' (with the same template variable).
-  scalarVars <- V.replicateM scalars pop
-  return $ TemplateRowScalarVars templateVar rowVar scalarVars
+popRow = \case
+  ScalarArity scalars -> ScalarVars <$> popScalars scalars
+  TemplateArity _templateVar scalars -> do
+    -- TODO(strager): Assert here that 'rowVar' is actually a
+    -- 'RowVar' with the same template variable.
+    scalarVars <- popScalars scalars
+    rowVar <- pop
+    return $ TemplateRowScalarVars rowVar scalarVars
+  where
+  popScalars :: Int -> FunctionState (Vector (Var Normal))
+  popScalars count = V.replicateM count popNormal
 
 pushRow :: RowArity Template -> FunctionState (RowVar Template)
-pushRow (ScalarArity scalars)
-  = ScalarVars <$> V.replicateM scalars push
-pushRow (TemplateArity templateVar scalars) = do
-  rowIndex <- freshVarIndex
-  let rowVar = Var rowIndex (RowVar templateVar)
-  pushVar rowVar
-  scalarVars <- V.replicateM scalars push
-  return $ TemplateRowScalarVars templateVar rowVar scalarVars
+pushRow = \case
+  ScalarArity scalars -> ScalarVars <$> pushScalars scalars
+  TemplateArity templateVar scalars -> do
+    rowIndex <- freshVarIndex
+    let rowVar = Var rowIndex (RowVar templateVar)
+    pushVar rowVar
+    scalarVars <- pushScalars scalars
+    return $ TemplateRowScalarVars rowVar scalarVars
+  where
+  pushScalars :: Int -> FunctionState (Vector (Var Normal))
+  pushScalars count = V.replicateM count pushNormal
 
 -- | FIXME(strager): Better description.  Returns the number
 -- of values consumed and returned by a function with the

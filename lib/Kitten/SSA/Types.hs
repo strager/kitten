@@ -475,7 +475,7 @@ instance ToText (Var form) where
   toText (Var index Data) = "s" <> showText index
   toText (Var index Parameter) = "p" <> showText index
   toText (Var index (RowVar t))
-    = "<" <> toText t <> ">r" <> showText index
+    = toText t <> "r" <> showText index
 
 data VarType (form :: Form) where
   Closed :: VarType form
@@ -503,11 +503,10 @@ instance ToText (RowArity form) where
     = "<" <> toText var <> ">+" <> showText scalars
 
 data RowVar (form :: Form) where
-  ScalarVars :: !(Vector (Var form)) -> RowVar form
+  ScalarVars :: !(Vector (Var Normal)) -> RowVar form
   TemplateRowScalarVars
-    :: !TemplateVar              -- ^ Template row variable.
-    -> !(Var form)               -- ^ N-ple of row values.
-    -> !(Vector (Var Template))  -- ^ Extra scalars (like 'ScalarVars').
+    :: !(Var Template)         -- ^ N-ple of row values.
+    -> !(Vector (Var Normal))  -- ^ Extra scalars (like 'ScalarVars').
     -> RowVar Template
 
 instance Show (RowVar form) where
@@ -515,10 +514,8 @@ instance Show (RowVar form) where
 
 instance ToText (RowVar form) where
   toText (ScalarVars scalars) = unwordsVector scalars
-  toText (TemplateRowScalarVars templateVar var scalars)
-    = toText templateVar <> "("
-    <> Text.unwords (toText var : map toText (V.toList scalars))
-    <> ")"
+  toText (TemplateRowScalarVars var scalars)
+    = Text.unwords (toText var : map toText (V.toList scalars))
 
 -- * Names.
 
@@ -588,7 +585,7 @@ afunctionToText name = \case
 bindRow :: RowVar form -> [Text] -> Text
 bindRow row rest = toText row <> " <- " <> Text.unwords rest
 
-bind :: Var form -> [Text] -> Text
+bind :: Var Normal -> [Text] -> Text
 bind var = bindRow (ScalarVars (V.singleton var))
 
 bindNone :: [Text] -> Text
