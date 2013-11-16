@@ -36,6 +36,7 @@ module Kitten.SSA.Types
   , adefinitionFunction
   ) where
 
+import Control.Applicative ((<$>))
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -638,3 +639,14 @@ instance Downcast Function Template Normal where
       , funcTemplateParameters = NoParameters
       , funcLocation = funcLocation
       }
+
+instance Downcast Var Template Normal where
+  downcast (Var index varType)
+    = Var index <$> downcast varType
+
+instance Downcast VarType Template Normal where
+  downcast = \case
+    Closed -> Just Closed
+    Data -> Just Data
+    Parameter -> Just Parameter
+    RowVar{} -> Nothing

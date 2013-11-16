@@ -118,9 +118,9 @@ funcFailure message = do
 popNormal :: FunctionState (Var Normal)
 popNormal = do
   var <- pop
-  case var of
-    Var _ (RowVar{}) -> error "Popped a template variable but expected a normal variable"
-    Var _ _ -> error "TODO popNormal"{-return var-}
+  case downcast var of
+    Nothing -> error "Popped a template variable but expected a normal variable"
+    Just v -> return v
 
 pop :: FunctionState (Var Template)
 pop = do
