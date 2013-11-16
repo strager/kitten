@@ -18,7 +18,6 @@ import Control.Monad.Trans.Reader hiding (local)
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
 import Data.Vector (Vector)
-import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Data.Vector as V
 
@@ -158,14 +157,11 @@ pushNormal = do
   return var
 
 push :: FunctionState (Var Template)
-push = do
-  var <- pushNormal
-  case var of
-    Var _ _ -> error "TODO push"{-return var-}
+push = upcast <$> pushNormal
 
 pushVar :: Var form -> FunctionState ()
-pushVar _var = modify $ \env -> env
-  { envDataStack = error "TODO pushVar"{-_var-} : envDataStack env }
+pushVar var = modify $ \env -> env
+  { envDataStack = upcast var : envDataStack env }
 
 popLocal :: FunctionState (Var Template)
 popLocal = do
@@ -219,31 +215,10 @@ simplifyFunctionForm :: Function Template -> AFunction
 simplifyFunctionForm function@Function{..}
   = case funcTemplateParameters of
     Parameters parameters | V.null parameters
-      -> NormalFunction $ castFunction function
+      -> case downcast function of
+        Nothing -> error "No parameters for template function"
+        Just f -> NormalFunction f
     _ -> TemplateFunction function
-
-castFunction :: Function Template -> Function Normal
-castFunction Function{..} = Function
-  -- NOTE(strager): GHC does not support type-changing GADT
-  -- record updates.
-  { funcInputs = castRowArity funcInputs
-  , funcOutputs = castRowArity funcOutputs
-  , funcInstructions = castInstructions funcInstructions
-  , funcClosures = funcClosures
-  , funcTemplateParameters = NoParameters
-  , funcLocation = funcLocation
-  }
-
-castRowArity :: RowArity Template -> RowArity Normal
-castRowArity = \case
-  ScalarArity arity -> ScalarArity arity
-  TemplateArity{} -> error "Kitten.SSA.castRowArity: Found TemplateArity"
-
-castInstructions
-  :: Vector (Instruction Template)
-  -> Vector (Instruction Normal)
--- FIXME(strager): Should throw a runtime error upon failure.
-castInstructions = unsafeCoerce
 
 functionPrelude :: RowArity form -> FunctionWriter ()
 functionPrelude arity = case arity of

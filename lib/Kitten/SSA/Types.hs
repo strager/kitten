@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -25,6 +27,9 @@ module Kitten.SSA.Types
   , Var(..)
   , VarType(..)
 
+  , Upcast(..)
+  , Downcast(..)
+
   , adefinitionName
   , afunctionToText
   , functionToText
@@ -34,6 +39,7 @@ module Kitten.SSA.Types
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Data.Vector as V
 
@@ -53,6 +59,12 @@ data TemplateArgument
   = RowArg !Int
 -}
 
+-- | A kind used to distinguish SSA forms which are
+-- templated (i.e. functions returning SSA forms) versus
+-- forms which are normalized.
+--
+-- There is an (unenforced) subtype relation 'c Normal' <:
+-- 'c Template' given a GADT 'c'.
 data Form = Template | Normal
 
 data AFunction
@@ -580,3 +592,49 @@ bind var = bindRow (ScalarVars (V.singleton var))
 
 bindNone :: [Text] -> Text
 bindNone = bindRow (ScalarVars V.empty)
+
+class Upcast (c :: Form -> *) (from :: Form) (to :: Form) where
+  upcast :: c from -> c to
+  upcast = unsafeCoerce
+
+instance Upcast Var form Template
+instance Upcast VarType form Template
+
+class Downcast (c :: Form -> *) (from :: Form) (to :: Form) where
+  downcast :: c from -> Maybe (c to)
+
+instance Downcast Instruction Template Normal where
+  -- FIXME(strager): Should throw a runtime error upon failure.
+  -- FIXME(strager): !!!
+  -- THIS IS SUPER UNSAFE!
+  -- THIS IS SUPER UNSAFE!
+  -- THIS IS SUPER UNSAFE!
+  --
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  -- XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  downcast = Just . unsafeCoerce
+
+instance Downcast RowArity Template Normal where
+  downcast = \case
+    ScalarArity arity -> Just $ ScalarArity arity
+    TemplateArity{} -> Nothing
+
+instance Downcast Function Template Normal where
+  downcast Function{..} = do
+    inputs <- downcast funcInputs
+    outputs <- downcast funcOutputs
+    instructions <- V.mapM downcast funcInstructions
+    -- NOTE(strager): GHC does not support type-changing
+    -- GADT record updates.
+    return Function
+      { funcInputs = inputs
+      , funcOutputs = outputs
+      , funcInstructions = instructions
+      , funcClosures = funcClosures
+      , funcTemplateParameters = NoParameters
+      , funcLocation = funcLocation
+      }
