@@ -81,6 +81,7 @@ library
     Kitten.Resolve.Monad,
     Kitten.Resolved,
     Kitten.SSA.FromTyped,
+    Kitten.SSA.Instantiate,
     Kitten.SSA.ToC,
     Kitten.SSA.Types,
     Kitten.Scope,

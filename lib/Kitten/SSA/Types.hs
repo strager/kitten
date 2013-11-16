@@ -15,20 +15,20 @@ module Kitten.SSA.Types
   , Closure(..)
   , ClosureName(..)
   , Definition(..)
+  , Downcast(..)
   , Form(..)
   , Function(..)
   , GlobalFunctionName(..)
   , Instruction(..)
   , RowArity(..)
   , RowVar(..)
+  , TemplateArgument(..)
   , TemplateParameter(..)
   , TemplateParameters(..)
   , TemplateVar(..)
+  , Upcast(..)
   , Var(..)
   , VarType(..)
-
-  , Upcast(..)
-  , Downcast(..)
 
   , adefinitionName
   , afunctionToText
@@ -55,10 +55,10 @@ import qualified Kitten.Util.Text as Text
 data FunctionRef
   = NormalRef !GlobalFunctionName
   | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
+-}
 
 data TemplateArgument
   = RowArg !Int
--}
 
 -- | A kind used to distinguish SSA forms which are
 -- templated (i.e. functions returning SSA forms) versus
@@ -160,7 +160,7 @@ data Closure = Closure
 data Instruction (form :: Form) where
   Activation
     :: !ClosureName
-    -> !(Vector (Var form))     -- ^ Captured variables.
+    -> !(Vector (Var Normal))  -- ^ Captured variables.
     -> !(Var Normal)
     -> !Location
     -> Instruction form
@@ -208,6 +208,7 @@ data Instruction (form :: Form) where
     -> !Location
     -> Instruction form
 
+  -- TODO(strager): Move to 'Function'.
   Return
     :: !(RowVar form)
     -> !Location
@@ -477,6 +478,9 @@ instance ToText (Var form) where
   toText (Var index (RowVar t))
     = toText t <> "r" <> showText index
 
+-- FIXME(strager): The contexts in which 'RowVar' may exist
+-- is distinct from the contexts in which the other variable
+-- types may exist.
 data VarType (form :: Form) where
   Closed :: VarType form
   Data :: VarType form

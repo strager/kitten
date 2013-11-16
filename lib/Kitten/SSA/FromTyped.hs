@@ -46,7 +46,7 @@ data FunctionEnv = FunctionEnv
   , envDataIndex :: !Int
   , envDataStack :: ![Var Template]
   , envLocalIndex :: !Int
-  , envLocalStack :: ![Var Template]
+  , envLocalStack :: ![Var Normal]
   , envTemplateParameters :: Vector TemplateParameter
 
   -- HACK(strager)
@@ -165,7 +165,7 @@ pushVar :: Var form -> FunctionState ()
 pushVar var = modify $ \env -> env
   { envDataStack = upcast var : envDataStack env }
 
-popLocal :: FunctionState (Var Template)
+popLocal :: FunctionState (Var Normal)
 popLocal = do
   env <- get
   case envLocalStack env of
@@ -174,12 +174,12 @@ popLocal = do
       put env { envLocalStack = xs }
       return x
 
-getLocal :: Name -> FunctionState (Var Template)
+getLocal :: Name -> FunctionState (Var Normal)
 getLocal name = do
   localStack <- gets envLocalStack
   return $ localStack !! nameIndex name
 
-pushLocalVar :: Var Template -> FunctionState ()
+pushLocalVar :: Var Normal -> FunctionState ()
 pushLocalVar var = modify $ \env -> env
   { envLocalStack = var : envLocalStack env }
 
@@ -346,7 +346,7 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     tellInstruction $ PairTerm aVar bVar pairVar loc
   Typed.Push value loc _type -> valueToSSA value loc
   Typed.Scoped term _loc _type -> do
-    var <- liftState pop
+    var <- liftState popNormal
     liftState $ pushLocalVar var
     termToSSA term
     poppedVar <- liftState popLocal
