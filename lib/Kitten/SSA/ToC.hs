@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Kitten.SSAToC
+module Kitten.SSA.ToC
   ( main
   , prelude
   , ssaDefinitionToC

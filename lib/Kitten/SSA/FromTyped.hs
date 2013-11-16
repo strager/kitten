@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Kitten.SSA
+module Kitten.SSA.FromTyped
   ( fragmentToSSA
   ) where
 

@@ -18,8 +18,8 @@ import Kitten.Error
 import Kitten.Fragment
 import Kitten.Interpret
 import Kitten.Name (NameGen, mkNameGen)
-import Kitten.SSA (fragmentToSSA)
-import Kitten.SSAToC (ssaDefinitionToC, ssaDefinitionToCProto, ssaFunctionToC, ssaFunctionToCProto)
+import Kitten.SSA.FromTyped (fragmentToSSA)
+import Kitten.SSA.ToC (ssaDefinitionToC, ssaDefinitionToCProto, ssaFunctionToC, ssaFunctionToCProto)
 import Kitten.Typed (Typed)
 import Kitten.Yarn (yarn)
 import Repl
@@ -28,7 +28,7 @@ import qualified Kitten.Compile as Compile
 import qualified Kitten.HTML as HTML
 import qualified Kitten.Infer.Config as Infer
 import qualified Kitten.SSA.Types as SSA
-import qualified Kitten.SSAToC as SSAToC
+import qualified Kitten.SSA.ToC as SSAToC
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as T
 
