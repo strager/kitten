@@ -22,10 +22,12 @@ module Kitten.Type
   , mono
   , row
   , rowDepth
+  , rowVarAndDepth
   , scalar
   , unScheme
   ) where
 
+import Control.Monad.Trans.State
 import Data.Monoid
 import Data.Set (Set)
 import Data.Text (Text)
@@ -272,6 +274,15 @@ rowDepth = \case
   Empty{} -> 0
   r :. _ -> 1 + rowDepth r
   Var{} -> 0
+
+rowVarAndDepth :: Type Row -> (Maybe (TypeName Row), Int)
+rowVarAndDepth = flip runState 0 . go
+  where
+  go :: Type Row -> State Int (Maybe (TypeName Row))
+  go = \case
+    Empty{} -> return Nothing
+    r :. _ -> modify (+ 1) >> go r
+    Var v _ -> return $ Just v
 
 scalar :: Name -> TypeName Scalar
 scalar = TypeName

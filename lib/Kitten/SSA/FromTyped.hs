@@ -195,8 +195,7 @@ functionToSSA
   -> GlobalState AFunction
 functionToSSA term loc = do
   (instructions, env)
-    <- traceShow (Typed.typedType term, loc)
-    $ flip runStateT defaultFunctionEnv
+    <- flip runStateT defaultFunctionEnv
     . execWriterT $ do
       (inputArity, outputArity) <- liftState
         $ functionRowArity (Typed.typedType term)
@@ -337,23 +336,19 @@ functionReference varInstantiations funcName inArity outArity
     (_, _) -> TemplateRef funcName <$> templateArgs
     where
     templateArgs :: FunctionState (TemplateArguments Template)
-    templateArgs = do
-      traceShow rowInstantiations (return ())
-      liftM Map.fromList $ mapM (uncurry templateArg) rowInstantiations
+    templateArgs = liftM Map.fromList
+      $ mapM (uncurry templateArg) rowInstantiations
     templateArg
       :: Type.TypeName Type.Row
       -> Type Type.Row
       -> FunctionState (TemplateVar, TemplateArgument Template)
     templateArg typeName rowType = do
-      let rowDepth = Type.rowDepth rowType
-      rowArity <- case Type.bottommost rowType of
-        Type.Var v _ -> do
+      rowArity <- case Type.rowVarAndDepth rowType of
+        (Just v, depth) -> do
           let param = RowParam v
           tellTemplateVar param
-          return $ TemplateArity param rowDepth
-        Type.Empty{} -> return $ ScalarArity rowDepth
-        -- TODO(strager): Type Row -> (Int, Maybe (TypeName Row))
-        _ -> error "FIXME bottommost; this shouldn't happen"
+          return $ TemplateArity param depth
+        (Nothing, depth) -> return $ ScalarArity depth
       return (RowParam typeName, RowArg rowArity)
     rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
     rowInstantiations
@@ -373,7 +368,6 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     -- the function's definition.
     let type_ = Typed.typedType (Type.unScheme (defTerm fn))
     -}
-    traceShow (Typed.typedType (Type.unScheme (defTerm fn))) (return())
     let type_ = _type
 
     traceShow type_ (return())
