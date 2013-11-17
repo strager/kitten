@@ -329,24 +329,32 @@ functionReference
   -> GlobalFunctionName
   -> RowArity a
   -> RowArity b
-  -> FunctionState FunctionRef
+  -> FunctionState (FunctionRef Template)
 functionReference varInstantiations funcName inArity outArity
   = case (inArity, outArity) of
     (ScalarArity _, ScalarArity _)  -- FIXME(strager): WRONG!
       -> return $ NormalRef funcName
     (_, _) -> TemplateRef funcName <$> templateArgs
     where
-    templateArgs :: FunctionState TemplateArguments
+    templateArgs :: FunctionState (TemplateArguments Template)
     templateArgs = do
       traceShow rowInstantiations (return ())
-      liftM Map.fromList . forM rowInstantiations $ \(typeName, rowType) -> do
-        -- apply :: (.r18 (.r18 -> .r19) -> .r19)
-        -- call apply :: (.r28 (.r28 -> .r27) -> .r27)
-        tellTemplateVar (RowParam typeName)
-        return
-          ( RowParam typeName
-          , RowArg (Type.rowDepth rowType)
-          )
+      liftM Map.fromList $ mapM (uncurry templateArg) rowInstantiations
+    templateArg
+      :: Type.TypeName Type.Row
+      -> Type Type.Row
+      -> FunctionState (TemplateVar, TemplateArgument Template)
+    templateArg typeName rowType = do
+      let rowDepth = Type.rowDepth rowType
+      rowArity <- case Type.bottommost rowType of
+        Type.Var v _ -> do
+          let param = RowParam v
+          tellTemplateVar param
+          return $ TemplateArity param rowDepth
+        Type.Empty{} -> return $ ScalarArity rowDepth
+        -- TODO(strager): Type Row -> (Int, Maybe (TypeName Row))
+        _ -> error "FIXME bottommost; this shouldn't happen"
+      return (RowParam typeName, RowArg rowArity)
     rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
     rowInstantiations
       = map (first Type.TypeName)
@@ -365,6 +373,7 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     -- the function's definition.
     let type_ = Typed.typedType (Type.unScheme (defTerm fn))
     -}
+    traceShow (Typed.typedType (Type.unScheme (defTerm fn))) (return())
     let type_ = _type
 
     traceShow type_ (return())

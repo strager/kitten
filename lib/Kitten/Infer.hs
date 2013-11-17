@@ -15,12 +15,10 @@ module Kitten.Infer
 import Control.Applicative hiding (some)
 import Control.Monad
 import Data.Monoid
-import Data.Set (Set)
 import Data.Vector (Vector)
 
 import qualified Data.Foldable as F
 import qualified Data.Map as M
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
@@ -389,28 +387,32 @@ infer finalEnv resolved = case resolved of
     o = Origin (AnnoType (Kitten.Type.Builtin name)) loc
 
   Call name loc -> do
-    Forall rows scalars effects type_ <- withLocation loc
+    instantiation <- withLocation loc
       $ instantiateM =<< declOrDef
     let
-      instantiations = Typed.VarInstantiations
+      type_ = instantiatedType instantiation
+      Typed.VarInstantiations rows scalars effects
+        = varInstantiations instantiation
+      insts = Typed.VarInstantiations
         (subs rows) (subs scalars) (subs effects)
-    return (Typed.Call name loc instantiations (sub finalEnv type_), type_)
+    return (Typed.Call name loc insts (sub finalEnv type_), type_)
     where
     declOrDef = do
       decls <- getsEnv envDecls
+      -- FIXME(strager): This looks backwards; shouldn't
+      -- locals be looked up first?  Also, this seems like
+      -- the wrong place to be performing this logic.
       case N.lookup name decls of
         Just decl -> return decl
         Nothing -> getsEnv ((N.! name) . envDefs)
-    subs :: (Substitute a) => Set (TypeName a) -> Typed.VarKindInstantiations a
     subs
-      = Typed.VarKindInstantiations . N.fromList
-      . map sub1 . Set.toList
-      where
-      sub1 :: (Substitute a) => TypeName a -> (Name, Type a)
-      sub1 typeName
-        = ( unTypeName typeName
-          , sub finalEnv (Type.Var typeName (Origin NoHint UnknownLocation))
-          )
+      :: (Substitute a)
+      => Typed.VarKindInstantiations a
+      -> Typed.VarKindInstantiations a
+    subs
+      = Typed.VarKindInstantiations
+      . N.map (sub finalEnv)
+      . Typed.instantiationNameMap
 
   Compose terms loc -> withLocation loc $ do
     (typedTerms, types) <- V.mapAndUnzipM recur terms

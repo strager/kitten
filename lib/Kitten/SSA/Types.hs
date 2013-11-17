@@ -169,7 +169,7 @@ data Instruction (form :: Form) where
     -> Instruction form
 
   Call
-    :: !FunctionRef
+    :: !(FunctionRef form)
     -> !(RowVar form)
     -> !(RowVar form)
     -> !Location
@@ -522,21 +522,21 @@ instance Show ClosureName where
 instance ToText ClosureName where
   toText (ClosureName index) = "c" <> showText index
 
-data FunctionRef
+data FunctionRef (form :: Form)
   = NormalRef !GlobalFunctionName
-  | TemplateRef !GlobalFunctionName !TemplateArguments
+  | TemplateRef !GlobalFunctionName !(TemplateArguments form)
 
-instance Show FunctionRef where
+instance Show (FunctionRef form) where
   show = Text.unpack . toText
 
-instance ToText FunctionRef where
+instance ToText (FunctionRef form) where
   toText (NormalRef name) = toText name
   toText (TemplateRef name args)
     = toText name <> "<"
     <> Text.intercalate ", " (map showArg $ Map.toList args)
     <> ">"
     where
-    showArg :: (TemplateVar, TemplateArgument) -> Text
+    showArg :: (TemplateVar, TemplateArgument form) -> Text
     showArg (var, arg) = toText var <> " = " <> toText arg
 
 newtype GlobalFunctionName = GlobalFunctionName Text
@@ -566,15 +566,16 @@ data TemplateParameters (form :: Form) where
     :: !(Set TemplateVar)
     -> TemplateParameters Template
 
-type TemplateArguments = Map TemplateVar TemplateArgument
+type TemplateArguments form
+  = Map TemplateVar (TemplateArgument form)
 
-data TemplateArgument
-  = RowArg !Int
+data TemplateArgument (form :: Form)
+  = RowArg !(RowArity form)
 
-instance Show TemplateArgument where
+instance Show (TemplateArgument form) where
   show = Text.unpack . toText
 
-instance ToText TemplateArgument where
+instance ToText (TemplateArgument form) where
   toText (RowArg arity) = showText arity
 
 -- * Utilities.

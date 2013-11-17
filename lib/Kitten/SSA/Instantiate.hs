@@ -12,13 +12,14 @@ import Control.Applicative ((<$>), (<*>), pure)
 import Control.Monad.Trans.Reader
 import Data.Monoid ((<>))
 import Data.Vector (Vector)
+import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Data.Map as Map
 import qualified Data.Vector as V
 
 import Kitten.SSA.Types
 
-type InstantiateM = Reader TemplateArguments
+type InstantiateM = Reader (TemplateArguments Template)
 
 class Instantiate (c :: Form -> *) where
   instantiate :: c Template -> InstantiateM (c Normal)
@@ -46,7 +47,7 @@ instance Instantiate RowArity where
   instantiate = \case
     ScalarArity arity -> return $ ScalarArity arity
     TemplateArity var arity -> do
-      RowArg rowArity <- parameter var
+      RowArg (ScalarArity rowArity) <- parameter var
       return $ ScalarArity (rowArity + arity)
 
 instance Instantiate Instruction where
@@ -57,7 +58,8 @@ instance Instantiate Instruction where
     Char value out loc -> return $ Char value out loc
     Call functionName inputs outputs loc
       -- TODO(strager): Instantiate functionName.
-      -> Call functionName
+      -- FIXME(strager): HACK!
+      -> Call (unsafeCoerce functionName)
         <$> instantiate inputs
         <*> instantiate outputs
         <*> pure loc
@@ -176,12 +178,14 @@ instance Instantiate BuiltinCall where
         <*> instantiate outputs
 
 runInstantiateM
-  :: TemplateArguments
+  :: TemplateArguments Template
   -> InstantiateM a
   -> a
 runInstantiateM = flip runReader
 
-parameter :: TemplateVar -> InstantiateM TemplateArgument
+parameter
+  :: TemplateVar
+  -> InstantiateM (TemplateArgument Template)
 parameter var = do
   parameters <- ask
   case Map.lookup var parameters of
@@ -189,12 +193,12 @@ parameter var = do
     Just param -> return param
 
 instantiateRowVar
-  :: Var 'Template
+  :: Var Template
   -> InstantiateM (Vector (Var Normal))
 instantiateRowVar = error "TODO instantiateRowVar"
 
 instantiateTemplate
-  :: TemplateArguments
+  :: TemplateArguments Template
   -> Function Template
   -> Function Normal
 instantiateTemplate arguments

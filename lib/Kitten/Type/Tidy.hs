@@ -9,6 +9,7 @@ module Kitten.Type.Tidy
   , runTidy
   , tidyRow
   , tidyRowType
+  , tidyScheme
   , tidyScalar
   , tidyScalarType
   ) where
@@ -21,6 +22,7 @@ import Kitten.NameMap (NameMap)
 import Kitten.Type
 
 import qualified Kitten.NameMap as NameMap
+import qualified Kitten.Util.Set as Set
 
 data TidyKindState a = TidyKindState
   { names :: !(NameMap (TypeName a))
@@ -115,3 +117,10 @@ tidyRowType type_ = case type_ of
   t1 :. t2 -> (:.) <$> tidyRowType t1 <*> tidyScalarType t2
   Empty{} -> pure type_
   Var name loc -> Var <$> tidyRow name <*> pure loc
+
+tidyScheme :: (a -> Tidy b) -> Scheme a -> Tidy (Scheme b)
+tidyScheme tidyValue (Forall rows_ scalars_ value)
+  = Forall
+    <$> Set.mapM tidyRow rows_
+    <*> Set.mapM tidyScalar scalars_
+    <*> tidyValue value

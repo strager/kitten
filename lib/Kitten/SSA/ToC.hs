@@ -32,7 +32,7 @@ class Mangle a where
   mangle :: a -> Text
 
 data Name
-  = FunctionName !SSA.FunctionRef ![SSA.ClosureName]
+  = FunctionName !(SSA.FunctionRef SSA.Normal) ![SSA.ClosureName]
   | BuiltinName !Builtin
   | RuntimeName !RuntimeFunction
 
@@ -61,7 +61,7 @@ data RuntimeFunction = Raw !Text  -- TODO(strager)
 rt :: Text -> Name
 rt = RuntimeName . Raw
 
-main :: SSA.FunctionRef -> Text
+main :: SSA.FunctionRef SSA.Normal -> Text
 main name
   = "int main(int argc, char **argv) {\n\
     \  (void) " <> mangle (FunctionName name []) <> "();\n\

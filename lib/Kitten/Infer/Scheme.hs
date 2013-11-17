@@ -6,7 +6,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Kitten.Infer.Scheme
-  ( Occurrences(..)
+  ( Instantiation(..)
+  , Occurrences(..)
   , Simplify(..)
   , Substitute(..)
   , free
@@ -18,8 +19,8 @@ module Kitten.Infer.Scheme
   , occurs
   ) where
 
+import Control.Applicative ((<$>), (<*>))
 import Control.Monad.Trans.State.Strict
-import Data.Foldable (foldrM)
 import Data.List
 import Data.Monoid
 import Data.Set (Set)
@@ -28,58 +29,72 @@ import qualified Data.Set as S
 
 import Kitten.Infer.Monad
 import Kitten.Name
-import Kitten.NameMap (NameMap)
 import Kitten.Type
+import Kitten.Type.Tidy
+import Kitten.Typed (VarInstantiations(..), VarKindInstantiations(..))
 import Kitten.Util.Monad
 
 import qualified Kitten.NameMap as N
 
+data Instantiation = Instantiation
+  { instantiatedType :: Type Scalar
+  , tidiedType :: Type Scalar
+  , varInstantiations :: VarInstantiations
+  -- ^ Mapping from 'tidiedType' to 'instantiatedType'.
+  }
+
 instantiateM
   :: TypeScheme
-  -> Inferred (Scheme (Type Scalar))  -- FIXME(strager): NOT A SCHEME!
+  -> Inferred Instantiation
 instantiateM scheme = do
   origin <- getsEnv envOrigin
-  (renamed, type_) <- liftState
-    $ state (instantiate origin scheme)
-  return $ Forall
-    (hack (envRows renamed))
-    (hack (envScalars renamed))
-    type_
-  where
-  hack :: NameMap (Type a) -> Set (TypeName a)
-  hack
-    = S.fromList
-    . map (\(_, Var x _) -> x)
-    . N.toList
+  liftState $ state (instantiate origin scheme)
 
 instantiatedM :: TypeScheme -> Inferred (Type Scalar)
-instantiatedM = fmap unScheme . instantiateM
+instantiatedM = fmap instantiatedType . instantiateM
 
-instantiate :: Origin -> TypeScheme -> Env -> ((Env, Type Scalar), Env)
-instantiate origin (Forall rows scalars type_) env
-  = ((renamed, sub renamed type_), env')
-
+instantiate :: Origin -> TypeScheme -> Env -> (Instantiation, Env)
+instantiate origin scheme env = (instantiation, env')
   where
-  renamed :: Env
+  instantiation :: Instantiation
+  instantiation = Instantiation
+    { instantiatedType = sub (varInstantiationsEnv vars) tidied
+    , tidiedType = tidied
+    , varInstantiations = vars
+    }
+
+  vars :: VarInstantiations
   env' :: Env
-  (renamed, env') = flip runState env $ composeM
-    [renames rows, renames scalars] emptyEnv
+  (vars, env') = flip runState env
+    $ VarInstantiations
+      <$> renames rows
+      <*> renames scalars
 
   renames
-    :: (Declare a)
-    => Set (TypeName a)
-    -> Env
-    -> State Env Env
-  renames = flip (foldrM rename) . S.toList
+    :: Set (TypeName a)
+    -> State Env (VarKindInstantiations a)
+  renames = foldMapM rename . S.toList
 
   rename
-    :: (Declare a)
-    => TypeName a
-    -> Env
-    -> State Env Env
-  rename name localEnv = do
+    :: TypeName a
+    -> State Env (VarKindInstantiations a)
+  rename name = do
     var <- state (freshVar origin)
-    return (declare name var localEnv)
+    return . VarKindInstantiations
+      $ N.singleton (unTypeName name) var
+
+  Forall rows scalars effects tidied = runTidy
+    $ tidyScheme tidyScalarType scheme
+
+-- | Creates an inference environment with the given
+-- unifications applied.
+varInstantiationsEnv :: VarInstantiations -> Env
+varInstantiationsEnv (VarInstantiations rows scalars effects)
+  = emptyEnv
+  { envRows = instantiationNameMap rows
+  , envScalars = instantiationNameMap scalars
+  , envEffects = instantiationNameMap effects
+  }
 
 generalize :: Type Scalar -> Inferred TypeScheme
 generalize type_ = do

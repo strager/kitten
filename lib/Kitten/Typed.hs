@@ -90,7 +90,7 @@ type TypedDef = Def (Scheme Typed)
 newtype VarKindInstantiations (a :: Kind)
   = VarKindInstantiations
     { instantiationNameMap :: NameMap (Type a) }
-  deriving (Eq)
+  deriving (Eq, Monoid)
 
 instance (ToText (Type a)) => Show (VarKindInstantiations a) where
   show = Text.unpack . toText
@@ -106,6 +106,11 @@ data VarInstantiations = VarInstantiations
   (VarKindInstantiations Scalar)
   (VarKindInstantiations Effect)
   deriving (Eq)
+
+instance Monoid VarInstantiations where
+  mempty = VarInstantiations mempty mempty mempty
+  VarInstantiations r s e `mappend` VarInstantiations r' s' e'
+    = VarInstantiations (r <> r') (s <> s') (e <> e')
 
 instance Show VarInstantiations where
   show = Text.unpack . toText
