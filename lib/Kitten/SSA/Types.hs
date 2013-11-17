@@ -24,7 +24,6 @@ module Kitten.SSA.Types
   , RowArity(..)
   , RowVar(..)
   , TemplateArgument(..)
-  , TemplateParameter(..)
   , TemplateParameters(..)
   , TemplateVar(..)
   , Upcast(..)
@@ -39,10 +38,12 @@ module Kitten.SSA.Types
 
 import Control.Applicative ((<$>))
 import Data.Monoid ((<>))
+import Data.Set (Set)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Unsafe.Coerce (unsafeCoerce)
 
+import qualified Data.Set as Set
 import qualified Data.Vector as V
 
 import Kitten.Location (Location)
@@ -102,8 +103,7 @@ functionToText name Function{..} = Text.unlines
       NoParameters -> ""
       Parameters params
         -> " <"
-        <> Text.intercalate " "
-          (V.toList $ V.imap showTemplateParameter params)
+        <> Text.unwords (map toText (Set.toList params))
         <> ">"
     , " ("
     , toText funcInputs
@@ -117,10 +117,6 @@ functionToText name Function{..} = Text.unlines
       (toText (ClosureName index)) (closureFunction closure))
     funcClosures
   ]
-  where
-  showTemplateParameter :: Int -> TemplateParameter -> Text
-  showTemplateParameter i param
-    = toText (TemplateVar i) <> ":" <> toText param
 
 data ADefinition
   = NormalDefinition !(Definition Normal)
@@ -547,30 +543,21 @@ instance ToText GlobalFunctionName where
 
 -- * Templates.
 
-data TemplateParameter
+data TemplateVar
   = RowParam !(Type.TypeName Type.Row)
   deriving (Eq, Ord)
-
-instance Show TemplateParameter where
-  show = Text.unpack . toText
-
-instance ToText TemplateParameter where
-  toText (RowParam var) = "row(" <> toText var <> ")"
-
-newtype TemplateVar = TemplateVar Int
-  deriving (Eq)
 
 instance Show TemplateVar where
   show = Text.unpack . toText
 
 instance ToText TemplateVar where
-  toText (TemplateVar var) = "<t" <> showText var <> ">"
+  toText (RowParam var) = "row(" <> toText var <> ")"
 
 data TemplateParameters (form :: Form) where
   NoParameters :: TemplateParameters Normal
   Parameters
-    -- TODO(strager): Disallow empty vector!
-    :: !(Vector TemplateParameter)
+    -- TODO(strager): Disallow empty set!
+    :: !(Set TemplateVar)
     -> TemplateParameters Template
 
 data TemplateArgument

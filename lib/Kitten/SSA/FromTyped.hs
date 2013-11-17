@@ -17,8 +17,10 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader hiding (local)
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
+import Data.Set (Set)
 import Data.Vector (Vector)
 
+import qualified Data.Set as Set
 import qualified Data.Vector as V
 
 import Kitten.Builtin (Builtin)
@@ -47,7 +49,7 @@ data FunctionEnv = FunctionEnv
   , envDataStack :: ![Var Template]
   , envLocalIndex :: !Int
   , envLocalStack :: ![Var Normal]
-  , envTemplateParameters :: Vector TemplateParameter
+  , envTemplateVars :: !(Set TemplateVar)
 
   -- HACK(strager)
   , envParameterIndex :: !Int
@@ -62,7 +64,7 @@ defaultFunctionEnv = FunctionEnv
   , envDataStack = []
   , envLocalIndex = 0
   , envLocalStack = []
-  , envTemplateParameters = V.empty
+  , envTemplateVars = Set.empty
 
   , envParameterIndex = 0
   , envInferredInputArity = 0
@@ -209,14 +211,14 @@ functionToSSA term loc = do
     , funcOutputs = outputs
     , funcInstructions = instructions
     , funcClosures = envClosures env
-    , funcTemplateParameters = Parameters (envTemplateParameters env)
+    , funcTemplateParameters = Parameters (envTemplateVars env)
     , funcLocation = loc
     }
 
 simplifyFunctionForm :: Function Template -> AFunction
 simplifyFunctionForm function@Function{..}
   = case funcTemplateParameters of
-    Parameters parameters | V.null parameters
+    Parameters parameters | Set.null parameters
       -> case downcast function of
         Nothing -> error "No parameters for template function"
         Just f -> NormalFunction f
@@ -249,15 +251,10 @@ setLocation = liftGlobalState . put
 tellInstruction :: Instruction Template -> FunctionWriter ()
 tellInstruction = tell . V.singleton
 
--- TODO(strager): Find a better name.
-tellTemplateParameter
-  :: TemplateParameter -> FunctionState TemplateVar
-tellTemplateParameter parameter = do
-  parameters <- gets envTemplateParameters
-  let var = TemplateVar (V.length parameters)
-  modify $ \s -> s
-    { envTemplateParameters = parameters `V.snoc` parameter }
-  return var
+tellTemplateVar :: TemplateVar -> FunctionState ()
+tellTemplateVar var
+  = modify $ \s -> s
+    { envTemplateVars = Set.insert var (envTemplateVars s) }
 
 liftState :: FunctionState a -> FunctionWriter a
 liftState = lift
@@ -307,8 +304,10 @@ functionRowArity = \case
     | rBottommost == sBottommost
     -> return (ScalarArity (Type.rowDepth r), ScalarArity (Type.rowDepth s))
     | otherwise -> do
-      rVar <- tellTemplateParameter $ RowParam (rowVar rBottommost)
-      sVar <- tellTemplateParameter $ RowParam (rowVar sBottommost)
+      let rVar = RowParam (rowVar rBottommost)
+      let sVar = RowParam (rowVar sBottommost)
+      tellTemplateVar rVar
+      tellTemplateVar sVar
       return
         ( TemplateArity rVar (Type.rowDepth r)
         , TemplateArity sVar (Type.rowDepth s)
