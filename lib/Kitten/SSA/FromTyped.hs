@@ -326,35 +326,30 @@ functionRowArity = \case
 functionReference
   :: Typed.VarInstantiations
   -> GlobalFunctionName
-  -> RowArity a
-  -> RowArity b
   -> FunctionState (FunctionRef Template)
-functionReference varInstantiations funcName inArity outArity
-  = case (inArity, outArity) of
-    (ScalarArity _, ScalarArity _)  -- FIXME(strager): WRONG!
-      -> return $ NormalRef funcName
-    (_, _) -> TemplateRef funcName <$> templateArgs
-    where
-    templateArgs :: FunctionState (TemplateArguments Template)
-    templateArgs = liftM Map.fromList
-      $ mapM (uncurry templateArg) rowInstantiations
-    templateArg
-      :: Type.TypeName Type.Row
-      -> Type Type.Row
-      -> FunctionState (TemplateVar, TemplateArgument Template)
-    templateArg typeName rowType = do
-      rowArity <- case Type.rowVarAndDepth rowType of
-        (Just v, depth) -> do
-          let param = RowParam v
-          tellTemplateVar param
-          return $ TemplateArity param depth
-        (Nothing, depth) -> return $ ScalarArity depth
-      return (RowParam typeName, RowArg rowArity)
-    rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
-    rowInstantiations
-      = map (first Type.TypeName)
-      . NameMap.toList . Typed.instantiationNameMap
-      $ Typed.rowInstantiations varInstantiations
+functionReference varInstantiations funcName
+  = TemplateRef funcName <$> templateArgs
+  where
+  templateArgs :: FunctionState (TemplateArguments Template)
+  templateArgs = liftM Map.fromList
+    $ mapM (uncurry templateArg) rowInstantiations
+  templateArg
+    :: Type.TypeName Type.Row
+    -> Type Type.Row
+    -> FunctionState (TemplateVar, TemplateArgument Template)
+  templateArg typeName rowType = do
+    rowArity <- case Type.rowVarAndDepth rowType of
+      (Just v, depth) -> do
+        let param = RowParam v
+        tellTemplateVar param
+        return $ TemplateArity param depth
+      (Nothing, depth) -> return $ ScalarArity depth
+    return (RowParam typeName, RowArg rowArity)
+  rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
+  rowInstantiations
+    = map (first Type.TypeName)
+    . NameMap.toList . Typed.instantiationNameMap
+    $ Typed.rowInstantiations varInstantiations
 
 termToSSA :: Typed -> FunctionWriter ()
 termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
@@ -373,8 +368,7 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     traceShow type_ (return())
     (inArity, outArity) <- liftState $ functionRowArity type_
     let funcName = GlobalFunctionName (defName fn)
-    funcRef <- liftState $ functionReference
-        varInstantiations funcName inArity outArity
+    funcRef <- liftState $ functionReference varInstantiations funcName
     inputs <- liftState $ popRow inArity
     outputs <- liftState $ pushRow outArity
     tellInstruction $ Call funcRef inputs outputs loc
