@@ -28,28 +28,32 @@ import qualified Data.Set as S
 
 import Kitten.Infer.Monad
 import Kitten.Name
+import Kitten.NameMap (NameMap)
 import Kitten.Type
-import Kitten.Typed (VarInstantiations(..), VarKindInstantiations(..))
 import Kitten.Util.Monad
 
 import qualified Kitten.NameMap as N
 
 instantiateM
   :: TypeScheme
-  -> Inferred (Type Scalar, VarInstantiations)
+  -> Inferred (Scheme (Type Scalar))  -- FIXME(strager): NOT A SCHEME!
 instantiateM scheme = do
   origin <- getsEnv envOrigin
   (renamed, type_) <- liftState
     $ state (instantiate origin scheme)
-  return
-    ( type_
-    , VarInstantiations
-      (VarKindInstantiations (envRows renamed))
-      (VarKindInstantiations (envScalars renamed))
-    )
+  return $ Forall
+    (hack (envRows renamed))
+    (hack (envScalars renamed))
+    type_
+  where
+  hack :: NameMap (Type a) -> Set (TypeName a)
+  hack
+    = S.fromList
+    . map (\(_, Var x _) -> x)
+    . N.toList
 
 instantiatedM :: TypeScheme -> Inferred (Type Scalar)
-instantiatedM = fmap fst . instantiateM
+instantiatedM = fmap unScheme . instantiateM
 
 instantiate :: Origin -> TypeScheme -> Env -> ((Env, Type Scalar), Env)
 instantiate origin (Forall rows scalars type_) env

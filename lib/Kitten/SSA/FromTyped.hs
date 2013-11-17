@@ -12,6 +12,7 @@ module Kitten.SSA.FromTyped
 import Debug.Trace
 
 import Control.Applicative
+import Control.Arrow (first)
 import Control.Monad (forM, liftM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader hiding (local)
@@ -331,18 +332,24 @@ functionReference
   -> FunctionState FunctionRef
 functionReference varInstantiations funcName inArity outArity
   = case (inArity, outArity) of
-    (ScalarArity _, ScalarArity _)
+    (ScalarArity _, ScalarArity _)  -- FIXME(strager): WRONG!
       -> return $ NormalRef funcName
-    (_, _) -> do
-      mapM_ (tellTemplateVar . fst) templateArgs
-      return $ TemplateRef funcName (Map.fromList templateArgs)
+    (_, _) -> TemplateRef funcName <$> templateArgs
     where
-    templateArgs :: [(TemplateVar, TemplateArgument)]
-    templateArgs
-      = map (\ (typeName, rowType) ->
-          ( RowParam (Type.TypeName typeName)
+    templateArgs :: FunctionState TemplateArguments
+    templateArgs = do
+      traceShow rowInstantiations (return ())
+      liftM Map.fromList . forM rowInstantiations $ \(typeName, rowType) -> do
+        -- apply :: (.r18 (.r18 -> .r19) -> .r19)
+        -- call apply :: (.r28 (.r28 -> .r27) -> .r27)
+        tellTemplateVar (RowParam typeName)
+        return
+          ( RowParam typeName
           , RowArg (Type.rowDepth rowType)
-          ))
+          )
+    rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
+    rowInstantiations
+      = map (first Type.TypeName)
       . NameMap.toList . Typed.instantiationNameMap
       $ Typed.rowInstantiations varInstantiations
 

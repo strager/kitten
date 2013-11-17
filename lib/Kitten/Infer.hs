@@ -15,10 +15,12 @@ module Kitten.Infer
 import Control.Applicative hiding (some)
 import Control.Monad
 import Data.Monoid
+import Data.Set (Set)
 import Data.Vector (Vector)
 
 import qualified Data.Foldable as F
 import qualified Data.Map as M
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
@@ -387,8 +389,11 @@ infer finalEnv resolved = case resolved of
     o = Origin (AnnoType (Kitten.Type.Builtin name)) loc
 
   Call name loc -> do
-    (type_, instantiations) <- withLocation loc
+    Forall rows scalars effects type_ <- withLocation loc
       $ instantiateM =<< declOrDef
+    let
+      instantiations = Typed.VarInstantiations
+        (subs rows) (subs scalars) (subs effects)
     return (Typed.Call name loc instantiations (sub finalEnv type_), type_)
     where
     declOrDef = do
@@ -396,6 +401,16 @@ infer finalEnv resolved = case resolved of
       case N.lookup name decls of
         Just decl -> return decl
         Nothing -> getsEnv ((N.! name) . envDefs)
+    subs :: (Substitute a) => Set (TypeName a) -> Typed.VarKindInstantiations a
+    subs
+      = Typed.VarKindInstantiations . N.fromList
+      . map sub1 . Set.toList
+      where
+      sub1 :: (Substitute a) => TypeName a -> (Name, Type a)
+      sub1 typeName
+        = ( unTypeName typeName
+          , sub finalEnv (Type.Var typeName (Origin NoHint UnknownLocation))
+          )
 
   Compose terms loc -> withLocation loc $ do
     (typedTerms, types) <- V.mapAndUnzipM recur terms
