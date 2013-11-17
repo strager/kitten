@@ -19,6 +19,7 @@ module Kitten.Type
   , (-->)
   , addHint
   , bottommost
+  , bottommostVar
   , mono
   , row
   , rowDepth
@@ -262,6 +263,40 @@ bottommost type_ = case type_ of
   Empty{} -> type_
   r :. _ -> bottommost r
   Var{} -> type_
+
+bottommostVar :: Type Row -> Maybe (TypeName Row)
+bottommostVar = fst . rowVarAndDepth
+
+{-
+foldType
+  :: (Type Row    -> a -> a)  -- ^ Row visitor.
+  -> (Type Scalar -> a -> a)  -- ^ Scalar visitor.
+  -> (Type Effect -> a -> a)  -- ^ Effect visitor.
+  -> a
+  -> Type b
+  -> a
+foldType doRow doScalar doEffect = go
+  where
+  go type_ = case type_ of
+    (a :& b)         -> doScalar type_ . go a . go b
+    (a :. b)         -> doRow    type_ . go a . go b
+    (:?) a           -> doScalar type_ . go a
+    (a :| b)         -> doScalar type_ . go a . go b
+    Bool{}           -> doScalar type_
+    Char{}           -> doScalar type_
+    Empty{}          -> doRow    type_
+    Float{}          -> doScalar type_
+    Function a b e _ -> doScalar type_ . go a . go b . go e
+    Handle{}         -> doScalar type_
+    Int{}            -> doScalar type_
+    Named{}          -> doScalar type_
+    Unit{}           -> doScalar type_
+    Var{}            -> doScalar type_
+    Vector a _       -> doScalar type_ . go a
+    (a :+ b)         -> doEffect type_ . go a . go b
+    NoEffect{}       -> doEffect type_
+    IOEffect{}       -> doEffect type_
+-}
 
 mono :: a -> Scheme a
 mono = Forall S.empty S.empty

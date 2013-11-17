@@ -52,7 +52,6 @@ data FunctionEnv = FunctionEnv
   , envDataStack :: ![Var Template]
   , envLocalIndex :: !Int
   , envLocalStack :: ![Var Normal]
-  , envTemplateVars :: !(Set TemplateVar)
 
   -- HACK(strager)
   , envParameterIndex :: !Int
@@ -67,7 +66,6 @@ defaultFunctionEnv = FunctionEnv
   , envDataStack = []
   , envLocalIndex = 0
   , envLocalStack = []
-  , envTemplateVars = Set.empty
 
   , envParameterIndex = 0
   , envInferredInputArity = 0
@@ -213,7 +211,7 @@ functionToSSA term loc = do
     , funcOutputs = outputs
     , funcInstructions = instructions
     , funcClosures = envClosures env
-    , funcTemplateParameters = Parameters (envTemplateVars env)
+    , funcTemplateParameters = Parameters (functionTemplateParameters (Typed.typedType term))
     , funcLocation = loc
     }
 
@@ -253,11 +251,6 @@ setLocation = liftGlobalState . put
 tellInstruction :: Instruction Template -> FunctionWriter ()
 tellInstruction = tell . V.singleton
 
-tellTemplateVar :: TemplateVar -> FunctionState ()
-tellTemplateVar var
-  = modify $ \s -> s
-    { envTemplateVars = Set.insert var (envTemplateVars s) }
-
 liftState :: FunctionState a -> FunctionWriter a
 liftState = lift
 
@@ -290,6 +283,52 @@ pushRow = \case
   pushScalars :: Int -> FunctionState (Vector (Var Normal))
   pushScalars count = V.replicateM count pushNormal
 
+functionTemplateParameters
+  :: Type Type.Scalar
+  -> Set TemplateVar
+functionTemplateParameters type_ = doScalar type_ Set.empty
+  where
+  doRow :: Type Type.Row -> Set TemplateVar -> Set TemplateVar
+  doRow = \case
+    a Type.:. b           -> doRow a . doScalar b
+    Type.Empty{}          -> id
+    Type.Var{}            -> id
+
+  doScalar :: Type Type.Scalar -> Set TemplateVar -> Set TemplateVar
+  doScalar = \case
+    a Type.:& b           -> doScalar a . doScalar b
+    (Type.:?) a           -> doScalar a
+    a Type.:| b           -> doScalar a . doScalar b
+    Type.Bool{}           -> id
+    Type.Char{}           -> id
+    Type.Float{}          -> id
+    Type.Function a b e _ -> doRow a . doRow b . doEffect e
+      . if aBottommost == bBottommost
+        then id
+        else insertRowParam aBottommost . insertRowParam bBottommost
+      where
+      aBottommost, bBottommost :: Maybe (Type.TypeName Type.Row)
+      aBottommost = Type.bottommostVar a
+      bBottommost = Type.bottommostVar b
+      insertRowParam
+        :: Maybe (Type.TypeName Type.Row)
+        -> Set TemplateVar
+        -> Set TemplateVar
+      insertRowParam = maybe id (Set.insert . RowParam)
+    Type.Handle{}         -> id
+    Type.Int{}            -> id
+    Type.Named{}          -> id
+    Type.Unit{}           -> id
+    Type.Var{}            -> id
+    Type.Vector a _       -> doScalar a
+
+  doEffect :: Type Type.Effect -> Set TemplateVar -> Set TemplateVar
+  doEffect = \case
+    a Type.:+ b           -> doEffect a . doEffect b
+    Type.Var{}            -> id
+    Type.NoEffect{}       -> id
+    Type.IOEffect{}       -> id
+
 -- | Returns the number of values consumed and returned by a
 -- function with the given type.
 --
@@ -306,13 +345,9 @@ functionRowArity = \case
     | rBottommost == sBottommost
     -> return (ScalarArity (Type.rowDepth r), ScalarArity (Type.rowDepth s))
     | otherwise -> do
-      let rVar = RowParam (rowVar rBottommost)
-      let sVar = RowParam (rowVar sBottommost)
-      tellTemplateVar rVar
-      tellTemplateVar sVar
       return
-        ( TemplateArity rVar (Type.rowDepth r)
-        , TemplateArity sVar (Type.rowDepth s)
+        ( TemplateArity (RowParam (rowVar rBottommost)) (Type.rowDepth r)
+        , TemplateArity (RowParam (rowVar sBottommost)) (Type.rowDepth s)
         )
     where
     rBottommost, sBottommost :: Type Type.Row
@@ -320,31 +355,31 @@ functionRowArity = \case
     sBottommost = Type.bottommost s
     rowVar :: Type Type.Row -> Type.TypeName Type.Row
     rowVar (Type.Var var _loc) = var
+    -- TODO(strager): More safety.
     rowVar type_ = error $ "Not a row variable: " ++ show type_
+  -- TODO(strager): More safety.
   type_ -> error $ "Not a function type: " ++ show type_
 
 functionReference
   :: Typed.VarInstantiations
   -> GlobalFunctionName
-  -> FunctionState (FunctionRef Template)
+  -> FunctionRef Template
 functionReference varInstantiations funcName
-  = TemplateRef funcName <$> templateArgs
+  = TemplateRef funcName templateArgs
   where
-  templateArgs :: FunctionState (TemplateArguments Template)
-  templateArgs = liftM Map.fromList
-    $ mapM (uncurry templateArg) rowInstantiations
+  templateArgs :: TemplateArguments Template
+  templateArgs = Map.fromList
+    $ map (uncurry templateArg) rowInstantiations
   templateArg
     :: Type.TypeName Type.Row
     -> Type Type.Row
-    -> FunctionState (TemplateVar, TemplateArgument Template)
-  templateArg typeName rowType = do
-    rowArity <- case Type.rowVarAndDepth rowType of
-      (Just v, depth) -> do
-        let param = RowParam v
-        tellTemplateVar param
-        return $ TemplateArity param depth
-      (Nothing, depth) -> return $ ScalarArity depth
-    return (RowParam typeName, RowArg rowArity)
+    -> (TemplateVar, TemplateArgument Template)
+  templateArg typeName rowType
+    = (RowParam typeName, RowArg rowArity)
+    where
+    rowArity = case Type.rowVarAndDepth rowType of
+      (Just v, depth) -> TemplateArity (RowParam v) depth
+      (Nothing, depth) -> ScalarArity depth
   rowInstantiations :: [(Type.TypeName Type.Row, Type.Type Type.Row)]
   rowInstantiations
     = map (first Type.TypeName)
@@ -368,7 +403,7 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     traceShow type_ (return())
     (inArity, outArity) <- liftState $ functionRowArity type_
     let funcName = GlobalFunctionName (defName fn)
-    funcRef <- liftState $ functionReference varInstantiations funcName
+    let funcRef = functionReference varInstantiations funcName
     inputs <- liftState $ popRow inArity
     outputs <- liftState $ pushRow outArity
     tellInstruction $ Call funcRef inputs outputs loc
