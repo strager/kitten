@@ -20,6 +20,7 @@ import Control.Monad.Trans.Writer
 import Data.Set (Set)
 import Data.Vector (Vector)
 
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Vector as V
 
@@ -321,10 +322,31 @@ functionRowArity = \case
     rowVar type_ = error $ "Not a row variable: " ++ show type_
   type_ -> error $ "Not a function type: " ++ show type_
 
+functionReference
+  :: Typed.VarInstantiations
+  -> GlobalFunctionName
+  -> RowArity a
+  -> RowArity b
+  -> FunctionState FunctionRef
+functionReference varInstantiations funcName inArity outArity
+  = case (inArity, outArity) of
+    (ScalarArity _, ScalarArity _)
+      -> return $ NormalRef funcName
+    (_, _) -> do
+      mapM_ (tellTemplateVar . fst) templateArgs
+      return $ TemplateRef funcName (Map.fromList templateArgs)
+    where
+    templateArgs :: [(TemplateVar, TemplateArgument)]
+    templateArgs
+      = map (\ (typeName, rowType)
+        -> (RowParam typeName, RowArg (Type.rowDepth rowType)))
+      . Map.toList . Typed.instantiationMap
+      $ Typed.rowInstantiations varInstantiations
+
 termToSSA :: Typed -> FunctionWriter ()
 termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
   Typed.Builtin builtin loc type_ -> builtinToSSA builtin loc type_
-  Typed.Call name loc _varInstantiations _type -> do
+  Typed.Call name loc varInstantiations _type -> do
     fn <- liftGlobalState $ lookUpFunction name
     {-
     -- HACK(strager): _type has superfluous scalars on
@@ -337,12 +359,9 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
 
     traceShow type_ (return())
     (inArity, outArity) <- liftState $ functionRowArity type_
-    let
-      funcName = GlobalFunctionName (defName fn)
-      funcRef = case (inArity, outArity) of
-        (ScalarArity _, ScalarArity _) -> NormalRef funcName
-        (_, _) -> TemplateRef funcName varz
-        where varz = error "TODO varz"
+    let funcName = GlobalFunctionName (defName fn)
+    funcRef <- liftState $ functionReference
+        varInstantiations funcName inArity outArity
     inputs <- liftState $ popRow inArity
     outputs <- liftState $ pushRow outArity
     tellInstruction $ Call funcRef inputs outputs loc

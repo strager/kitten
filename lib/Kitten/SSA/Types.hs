@@ -24,6 +24,7 @@ module Kitten.SSA.Types
   , RowArity(..)
   , RowVar(..)
   , TemplateArgument(..)
+  , TemplateArguments
   , TemplateParameters(..)
   , TemplateVar(..)
   , Upcast(..)
@@ -37,12 +38,14 @@ module Kitten.SSA.Types
   ) where
 
 import Control.Applicative ((<$>))
+import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Unsafe.Coerce (unsafeCoerce)
 
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Vector as V
 
@@ -521,7 +524,7 @@ instance ToText ClosureName where
 
 data FunctionRef
   = NormalRef !GlobalFunctionName
-  | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
+  | TemplateRef !GlobalFunctionName !TemplateArguments
 
 instance Show FunctionRef where
   show = Text.unpack . toText
@@ -530,8 +533,11 @@ instance ToText FunctionRef where
   toText (NormalRef name) = toText name
   toText (TemplateRef name args)
     = toText name <> "<"
-    <> Text.intercalate ", " (mapVector toText args)
+    <> Text.intercalate ", " (map showArg $ Map.toList args)
     <> ">"
+    where
+    showArg :: (TemplateVar, TemplateArgument) -> Text
+    showArg (var, arg) = toText var <> " = " <> toText arg
 
 newtype GlobalFunctionName = GlobalFunctionName Text
 
@@ -559,6 +565,8 @@ data TemplateParameters (form :: Form) where
     -- TODO(strager): Disallow empty set!
     :: !(Set TemplateVar)
     -> TemplateParameters Template
+
+type TemplateArguments = Map TemplateVar TemplateArgument
 
 data TemplateArgument
   = RowArg !Int

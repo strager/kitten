@@ -10,7 +10,6 @@ module Kitten.SSA.Instantiate
 
 import Control.Applicative ((<$>), (<*>), pure)
 import Control.Monad.Trans.Reader
-import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Vector (Vector)
 
@@ -19,7 +18,7 @@ import qualified Data.Vector as V
 
 import Kitten.SSA.Types
 
-type InstantiateM = Reader (Map TemplateVar TemplateArgument)
+type InstantiateM = Reader TemplateArguments
 
 class Instantiate (c :: Form -> *) where
   instantiate :: c Template -> InstantiateM (c Normal)
@@ -177,7 +176,7 @@ instance Instantiate BuiltinCall where
         <*> instantiate outputs
 
 runInstantiateM
-  :: Map TemplateVar TemplateArgument
+  :: TemplateArguments
   -> InstantiateM a
   -> a
 runInstantiateM = flip runReader
@@ -195,7 +194,7 @@ instantiateRowVar
 instantiateRowVar = error "TODO instantiateRowVar"
 
 instantiateTemplate
-  :: Map TemplateVar TemplateArgument
+  :: TemplateArguments
   -> Function Template
   -> Function Normal
 instantiateTemplate arguments

@@ -15,6 +15,7 @@ module Kitten.Typed
   , VarInstantiations(..)
   , VarKindInstantiations(..)
   , defTypeScheme
+  , rowInstantiations
   , typedType
   ) where
 
@@ -86,7 +87,8 @@ type TypedDef = Def (Scheme Typed)
 --   a -> Int
 --   b -> String
 newtype VarKindInstantiations (a :: Kind)
-  = VarKindInstantiations (Map (TypeName a) (Type a))
+  = VarKindInstantiations
+    { instantiationMap :: Map (TypeName a) (Type a) }
   deriving (Eq, Monoid)
 
 instance (ToText (Type a)) => Show (VarKindInstantiations a) where
@@ -121,6 +123,10 @@ defTypeScheme :: TypedDef -> TypeScheme
 defTypeScheme def = type_ <$ defTerm def
   where
   type_ = typedType $ unScheme (defTerm def)
+
+rowInstantiations
+  :: VarInstantiations -> VarKindInstantiations Row
+rowInstantiations (VarInstantiations rows _ _) = rows
 
 typedType :: Typed -> Type Scalar
 typedType typed = case typed of
