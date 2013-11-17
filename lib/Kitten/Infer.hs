@@ -386,8 +386,10 @@ infer finalEnv resolved = case resolved of
     o :: Origin
     o = Origin (AnnoType (Kitten.Type.Builtin name)) loc
 
-  Call name loc -> asTyped (Typed.Call name) loc
-    $ instantiateM =<< declOrDef
+  Call name loc -> do
+    type_ <- withLocation loc $ instantiateM =<< declOrDef
+    let instantiations = error "TODO instantations"  -- TODO(strager)
+    return (Typed.Call name loc instantiations (sub finalEnv type_), type_)
     where
     declOrDef = do
       decls <- getsEnv envDecls

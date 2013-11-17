@@ -103,7 +103,8 @@ flattenDef def = do
 flattenTerm :: Typed -> Writer LocMap ()
 flattenTerm theTerm = case theTerm of
   Builtin _builtin loc type_ -> tellNode loc $ ScalarType type_
-  Call _name loc type_ -> tellNode loc $ ScalarType type_
+  Call _name loc _instantiations type_
+    -> tellNode loc $ ScalarType type_
   Compose terms loc type_ -> do
     tellNode loc $ ScalarType type_
     V.mapM_ flattenTerm terms

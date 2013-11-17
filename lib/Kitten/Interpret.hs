@@ -49,7 +49,8 @@ interpret stack prelude fragment = liftM envData $ execStateT
 interpretTerm :: Typed -> Interpret
 interpretTerm typed = case typed of
   Typed.Builtin builtin loc _type -> withLocation loc $ interpretBuiltin builtin
-  Typed.Call name loc _type -> withLocation loc $ interpretOverload name
+  Typed.Call name loc _instantiations _type
+    -> withLocation loc $ interpretOverload name
   Typed.Compose terms loc _type -> withLocation loc
     $ F.mapM_ interpretTerm terms
   Typed.From _ loc _type -> withLocation loc $ do

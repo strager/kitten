@@ -188,7 +188,7 @@ yarnEntry terms = do
 yarnTerm :: Typed -> Yarn (Vector Instruction)
 yarnTerm term = case term of
   Typed.Builtin builtin _ _ -> return $ V.singleton (Builtin builtin)
-  Typed.Call (Name index) _ _ -> return $ V.singleton (Call index)
+  Typed.Call (Name index) _ _ _ -> return $ V.singleton (Call index)
   Typed.Compose terms _ _ -> concatMapM yarnTerm terms
   Typed.From{} -> return V.empty
   Typed.PairTerm a b _ _ -> do

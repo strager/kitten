@@ -1,17 +1,31 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+
+-- NOTE(strager): The use of this extension (instance of
+-- ToText VarKindInstantiations) is safe (I believe).
+{-# LANGUAGE UndecidableInstances #-}
 
 module Kitten.Typed
   ( Typed(..)
   , TypedDef
   , Value(..)
+  , VarInstantiations(..)
+  , VarKindInstantiations(..)
   , defTypeScheme
   , typedType
   ) where
 
 import Control.Applicative ((<$))
+import Data.Map (Map)
+import Data.Monoid
 import Data.Text (Text)
 import Data.Vector (Vector)
+
+import qualified Data.Map as Map
+import qualified Data.Text as Text
 
 import Kitten.AST
 import Kitten.Builtin (Builtin)
@@ -24,7 +38,7 @@ import Kitten.Util.Text (ToText(..), showText)
 
 data Typed
   = Builtin !Builtin !Location (Type Scalar)
-  | Call !Name !Location (Type Scalar)
+  | Call !Name !Location VarInstantiations (Type Scalar)
   | Compose !(Vector Typed) !Location (Type Scalar)
   | From !Text !Location (Type Scalar)
   | PairTerm !Typed !Typed !Location (Type Scalar)
@@ -37,6 +51,10 @@ data Typed
 -- TODO(strager)
 instance ToText Typed where
   toText = showText
+
+instance AST Typed where
+  type TermValue Typed = Value
+  type TermDef Typed = TypedDef
 
 data Value
   = Bool !Bool
@@ -52,9 +70,52 @@ data Value
 
 type TypedDef = Def (Scheme Typed)
 
-instance AST Typed where
-  type TermValue Typed = Value
-  type TermDef Typed = TypedDef
+-- | Substitutions of function variables at a specific call
+-- site.
+--
+-- For example, given:
+--
+--   def map ((a -> b) [a] -> [b])
+--
+-- and a call:
+--
+--   {showInt} [1, 2, 3] map
+--
+-- the instantiations of 'map' are:
+--
+--   a -> Int
+--   b -> String
+newtype VarKindInstantiations (a :: Kind)
+  = VarKindInstantiations (Map (TypeName a) (Type a))
+  deriving (Eq, Monoid)
+
+instance (ToText (Type a)) => Show (VarKindInstantiations a) where
+  show = Text.unpack . toText
+
+instance (ToText (Type a)) => ToText (VarKindInstantiations a) where
+  toText (VarKindInstantiations instantiations)
+    = Text.intercalate ", "
+    . map (\(from, to) -> toText from <> " -> " <> toText to)
+    $ Map.toList instantiations
+
+data VarInstantiations = VarInstantiations
+  (VarKindInstantiations Row)
+  (VarKindInstantiations Scalar)
+  (VarKindInstantiations Effect)
+  deriving (Eq)
+
+instance Show VarInstantiations where
+  show = Text.unpack . toText
+
+instance ToText VarInstantiations where
+  toText (VarInstantiations rows scalars effects)
+    = Text.intercalate ", "
+    $ [toText rows, toText scalars, toText effects]
+
+instance Monoid VarInstantiations where
+  mempty = VarInstantiations mempty mempty mempty
+  VarInstantiations r s e `mappend` VarInstantiations r' s' e'
+    = VarInstantiations (r <> r') (s <> s') (e <> e')
 
 defTypeScheme :: TypedDef -> TypeScheme
 defTypeScheme def = type_ <$ defTerm def
@@ -64,7 +125,7 @@ defTypeScheme def = type_ <$ defTerm def
 typedType :: Typed -> Type Scalar
 typedType typed = case typed of
   Builtin _ _ t -> t
-  Call _ _ t -> t
+  Call _ _ _ t -> t
   Compose _ _ t -> t
   From _ _ t -> t
   PairTerm _ _ _ t -> t

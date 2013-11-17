@@ -291,9 +291,14 @@ pushRow = \case
   pushScalars :: Int -> FunctionState (Vector (Var Normal))
   pushScalars count = V.replicateM count pushNormal
 
--- | FIXME(strager): Better description.  Returns the number
--- of values consumed and returned by a function with the
--- given type.
+-- | Returns the number of values consumed and returned by a
+-- function with the given type.
+--
+-- FIXME(strager): Better description.
+--
+-- FIXME(strager): By the return type, you could expect
+-- (ScalarArity ..., TemplateRowScalarVars ...) is valid
+-- (but it isn't).
 functionRowArity
   :: Type Type.Scalar
   -> FunctionState (RowArity Template, RowArity Template)
@@ -320,7 +325,7 @@ functionRowArity = \case
 termToSSA :: Typed -> FunctionWriter ()
 termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
   Typed.Builtin builtin loc type_ -> builtinToSSA builtin loc type_
-  Typed.Call name loc _type -> do
+  Typed.Call name loc _varInstantiations _type -> do
     fn <- liftGlobalState $ lookUpFunction name
     {-
     -- HACK(strager): _type has superfluous scalars on
@@ -333,10 +338,15 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
 
     traceShow type_ (return())
     (inArity, outArity) <- liftState $ functionRowArity type_
+    let
+      funcName = GlobalFunctionName (defName fn)
+      funcRef = case (inArity, outArity) of
+        (ScalarArity _, ScalarArity _) -> NormalRef funcName
+        (_, _) -> TemplateRef funcName varz
+        where varz = error "TODO varz"
     inputs <- liftState $ popRow inArity
     outputs <- liftState $ pushRow outArity
-    let funcName = GlobalFunctionName (defName fn)
-    tellInstruction $ Call funcName inputs outputs loc
+    tellInstruction $ Call funcRef inputs outputs loc
   Typed.Compose terms _loc _type -> V.mapM_ termToSSA terms
   Typed.From{} -> return ()
   Typed.PairTerm a b loc _type -> do
@@ -510,7 +520,6 @@ valueToSSA theValue loc = case theValue of
     charVars <- mapM (\c -> one (Char c) >> liftState popNormal)
       $ Text.unpack value
     one $ Vector (V.fromList charVars)
-
   Typed.Unit -> removeFromASTPlease "Unit"
   where
   one

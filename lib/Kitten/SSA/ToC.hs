@@ -32,7 +32,7 @@ class Mangle a where
   mangle :: a -> Text
 
 data Name
-  = FunctionName !SSA.GlobalFunctionName ![SSA.ClosureName]
+  = FunctionName !SSA.FunctionRef ![SSA.ClosureName]
   | BuiltinName !Builtin
   | RuntimeName !RuntimeFunction
 
@@ -61,7 +61,7 @@ data RuntimeFunction = Raw !Text  -- TODO(strager)
 rt :: Text -> Name
 rt = RuntimeName . Raw
 
-main :: SSA.GlobalFunctionName -> Text
+main :: SSA.FunctionRef -> Text
 main name
   = "int main(int argc, char **argv) {\n\
     \  (void) " <> mangle (FunctionName name []) <> "();\n\
@@ -286,7 +286,7 @@ functionSignatureToC
   -> Text
 functionSignatureToC SSA.Function{..} globalName closureNames
   = signature (typeOfRowArity funcOutputs)
-    (mangle $ FunctionName globalName closureNames)
+    (mangle $ FunctionName (SSA.NormalRef globalName) closureNames)
     $ case closureNames of
       [] -> formalParameters
       (_:_) -> ("ktn_activation *" <> mangle ActivationVar)
@@ -409,8 +409,9 @@ ssaInstructionToC globalName closureNames instruction = case instruction of
     function :: Text
     function = "((ktn_closure_function) (" <> functionName <> "))"
     functionName :: Text
-    functionName = mangle
-      $ FunctionName globalName (closureName : closureNames)
+    functionName = mangle $ FunctionName
+      (SSA.NormalRef globalName)
+      (closureName : closureNames)
   SSA.Bool value out loc -> mkVar out loc $ boolToC value
   SSA.Char value out loc -> mkVar out loc $ charToC value
   SSA.Call name inputs outputs loc

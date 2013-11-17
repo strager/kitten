@@ -18,6 +18,7 @@ module Kitten.SSA.Types
   , Downcast(..)
   , Form(..)
   , Function(..)
+  , FunctionRef(..)
   , GlobalFunctionName(..)
   , Instruction(..)
   , RowArity(..)
@@ -50,15 +51,6 @@ import Kitten.Util.Text (ToText(..), showText)
 import qualified Kitten.Kind as Type
 import qualified Kitten.Type as Type
 import qualified Kitten.Util.Text as Text
-
-{-
-data FunctionRef
-  = NormalRef !GlobalFunctionName
-  | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
--}
-
-data TemplateArgument
-  = RowArg !Int
 
 -- | A kind used to distinguish SSA forms which are
 -- templated (i.e. functions returning SSA forms) versus
@@ -178,7 +170,7 @@ data Instruction (form :: Form) where
     -> Instruction form
 
   Call
-    :: !GlobalFunctionName
+    :: !FunctionRef
     -> !(RowVar form)
     -> !(RowVar form)
     -> !Location
@@ -531,6 +523,20 @@ instance Show ClosureName where
 instance ToText ClosureName where
   toText (ClosureName index) = "c" <> showText index
 
+data FunctionRef
+  = NormalRef !GlobalFunctionName
+  | TemplateRef !GlobalFunctionName !(Vector TemplateArgument)
+
+instance Show FunctionRef where
+  show = Text.unpack . toText
+
+instance ToText FunctionRef where
+  toText (NormalRef name) = toText name
+  toText (TemplateRef name args)
+    = toText name <> "<"
+    <> Text.intercalate ", " (mapVector toText args)
+    <> ">"
+
 newtype GlobalFunctionName = GlobalFunctionName Text
 
 instance Show GlobalFunctionName where
@@ -566,6 +572,15 @@ data TemplateParameters (form :: Form) where
     -- TODO(strager): Disallow empty vector!
     :: !(Vector TemplateParameter)
     -> TemplateParameters Template
+
+data TemplateArgument
+  = RowArg !Int
+
+instance Show TemplateArgument where
+  show = Text.unpack . toText
+
+instance ToText TemplateArgument where
+  toText (RowArg arity) = showText arity
 
 -- * Utilities.
 
