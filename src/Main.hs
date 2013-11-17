@@ -19,7 +19,7 @@ import Kitten.Fragment
 import Kitten.Interpret
 import Kitten.Name (NameGen, mkNameGen)
 import Kitten.SSA.FromTyped (fragmentToSSA)
-import Kitten.SSA.ToC (ssaDefinitionToC, ssaDefinitionToCProto, ssaFunctionToC, ssaFunctionToCProto)
+import Kitten.SSA.ToC (ssaDefinitionToC{-, ssaDefinitionToCProto, ssaFunctionToC, ssaFunctionToCProto-})
 import Kitten.Typed (Typed)
 import Kitten.Yarn (yarn)
 import Repl
@@ -150,9 +150,9 @@ interpretAll entryPoints compileMode prelude config nameGen
                 (SSA.adefinitionFunction def)
             T.putStrLn $ SSA.afunctionToText "top-level" fragSSA
         CSourceMode -> case fragmentToSSA (prelude <> result) of
-          (fragSSA, defSSAs) -> do
+          (_fragSSA, defSSAs) -> do
             T.putStrLn SSAToC.prelude
-            let mainName = SSA.GlobalFunctionName "main"
+            let _mainName = SSA.GlobalFunctionName "main"
 
             mapM_ (T.putStrLn . assaDefinitionToC) defSSAs
             where
