@@ -13,6 +13,7 @@ module Kitten.Infer.Scheme
   , generalize
   , instantiate
   , instantiateM
+  , instantiatedM
   , normalize
   , occurs
   ) where
@@ -28,18 +29,31 @@ import qualified Data.Set as S
 import Kitten.Infer.Monad
 import Kitten.Name
 import Kitten.Type
+import Kitten.Typed (VarInstantiations(..), VarKindInstantiations(..))
 import Kitten.Util.Monad
 
 import qualified Kitten.NameMap as N
 
-instantiateM :: TypeScheme -> Inferred (Type Scalar)
+instantiateM
+  :: TypeScheme
+  -> Inferred (Type Scalar, VarInstantiations)
 instantiateM scheme = do
   origin <- getsEnv envOrigin
-  liftState $ state (instantiate origin scheme)
+  (renamed, type_) <- liftState
+    $ state (instantiate origin scheme)
+  return
+    ( type_
+    , VarInstantiations
+      (VarKindInstantiations (envRows renamed))
+      (VarKindInstantiations (envScalars renamed))
+    )
 
-instantiate :: Origin -> TypeScheme -> Env -> (Type Scalar, Env)
+instantiatedM :: TypeScheme -> Inferred (Type Scalar)
+instantiatedM = fmap fst . instantiateM
+
+instantiate :: Origin -> TypeScheme -> Env -> ((Env, Type Scalar), Env)
 instantiate origin (Forall rows scalars type_) env
-  = (sub renamed type_, env')
+  = ((renamed, sub renamed type_), env')
 
   where
   renamed :: Env

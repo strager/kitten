@@ -20,12 +20,10 @@ module Kitten.Typed
   ) where
 
 import Control.Applicative ((<$))
-import Data.Map (Map)
 import Data.Monoid
 import Data.Text (Text)
 import Data.Vector (Vector)
 
-import qualified Data.Map as Map
 import qualified Data.Text as Text
 
 import Kitten.AST
@@ -34,8 +32,11 @@ import Kitten.ClosedName
 import Kitten.Def
 import Kitten.Location
 import Kitten.Name
+import Kitten.NameMap (NameMap)
 import Kitten.Type hiding (Annotated(..), Hint(..))
 import Kitten.Util.Text (ToText(..), showText)
+
+import qualified Kitten.NameMap as NameMap
 
 data Typed
   = Builtin !Builtin !Location (Type Scalar)
@@ -88,17 +89,17 @@ type TypedDef = Def (Scheme Typed)
 --   b -> String
 newtype VarKindInstantiations (a :: Kind)
   = VarKindInstantiations
-    { instantiationMap :: Map (TypeName a) (Type a) }
-  deriving (Eq, Monoid)
+    { instantiationNameMap :: NameMap (Type a) }
+  deriving (Eq)
 
 instance (ToText (Type a)) => Show (VarKindInstantiations a) where
   show = Text.unpack . toText
 
 instance (ToText (Type a)) => ToText (VarKindInstantiations a) where
-  toText (VarKindInstantiations instantiations)
+  toText
     = Text.intercalate ", "
     . map (\(from, to) -> toText from <> " -> " <> toText to)
-    $ Map.toList instantiations
+    . NameMap.toList . instantiationNameMap
 
 data VarInstantiations = VarInstantiations
   (VarKindInstantiations Row)
@@ -112,12 +113,7 @@ instance Show VarInstantiations where
 instance ToText VarInstantiations where
   toText (VarInstantiations rows scalars effects)
     = Text.intercalate ", "
-    $ [toText rows, toText scalars, toText effects]
-
-instance Monoid VarInstantiations where
-  mempty = VarInstantiations mempty mempty mempty
-  VarInstantiations r s e `mappend` VarInstantiations r' s' e'
-    = VarInstantiations (r <> r') (s <> s') (e <> e')
+      [toText rows, toText scalars, toText effects]
 
 defTypeScheme :: TypedDef -> TypeScheme
 defTypeScheme def = type_ <$ defTerm def

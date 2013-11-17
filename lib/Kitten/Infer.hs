@@ -111,8 +111,8 @@ inferFragment prelude fragment stackTypes = mdo
             origin <- getsEnv envOrigin
             fmap mono . forAll $ \r s -> Type.Function r s origin
       saveDefWith (flip const) index typeScheme
-      declared <- instantiateM declaredScheme
-      inferred <- instantiateM typeScheme
+      declared <- instantiatedM declaredScheme
+      inferred <- instantiatedM typeScheme
       declared === inferred
       return def { defTerm = typedTerm <$ typeScheme }
 
@@ -387,8 +387,8 @@ infer finalEnv resolved = case resolved of
     o = Origin (AnnoType (Kitten.Type.Builtin name)) loc
 
   Call name loc -> do
-    type_ <- withLocation loc $ instantiateM =<< declOrDef
-    let instantiations = error "TODO instantations"  -- TODO(strager)
+    (type_, instantiations) <- withLocation loc
+      $ instantiateM =<< declOrDef
     return (Typed.Call name loc instantiations (sub finalEnv type_), type_)
     where
     declOrDef = do
@@ -409,7 +409,7 @@ infer finalEnv resolved = case resolved of
     return (Typed.Compose typedTerms loc (sub finalEnv type_), type_)
 
   From name loc -> asTyped (Typed.From name) loc $ do
-    underlying <- instantiateM =<< getsEnv ((M.! name) . envTypeDefs)
+    underlying <- instantiatedM =<< getsEnv ((M.! name) . envTypeDefs)
     origin <- getsEnv envOrigin
     forAll $ \r -> (r :. Type.Named name origin --> r :. underlying) origin
 
@@ -434,7 +434,7 @@ infer finalEnv resolved = case resolved of
     return (Typed.Scoped term' loc (sub finalEnv type_), type_)
 
   To name loc -> asTyped (Typed.To name) loc $ do
-    underlying <- instantiateM =<< getsEnv ((M.! name) . envTypeDefs)
+    underlying <- instantiatedM =<< getsEnv ((M.! name) . envTypeDefs)
     origin <- getsEnv envOrigin
     forAll $ \r -> (r :. underlying --> r :. Type.Named name origin) origin
 

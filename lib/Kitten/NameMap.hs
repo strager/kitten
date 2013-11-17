@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Kitten.NameMap
   ( NameMap
   , (!)
@@ -7,8 +9,10 @@ module Kitten.NameMap
   , insertWith
   , lookup
   , member
+  , toList
   ) where
 
+import Control.Arrow (first)
 import Data.IntMap (IntMap)
 import Prelude hiding (lookup)
 
@@ -17,6 +21,7 @@ import qualified Data.IntMap as I
 import Kitten.Name
 
 newtype NameMap a = NameMap (IntMap a)
+  deriving (Eq)
 
 (!) :: NameMap a -> Name -> a
 NameMap names ! Name index = names I.! index
@@ -44,3 +49,6 @@ lookup (Name index) (NameMap names)
 member :: Name -> NameMap a -> Bool
 member (Name index) (NameMap names)
   = I.member index names
+
+toList :: NameMap a -> [(Name, a)]
+toList (NameMap names) = map (first Name) $ I.toList names

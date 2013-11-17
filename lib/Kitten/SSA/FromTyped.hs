@@ -36,6 +36,7 @@ import Kitten.Typed (Typed, TypedDef)
 
 import qualified Kitten.Builtin as Builtin
 import qualified Kitten.Kind as Type
+import qualified Kitten.NameMap as NameMap
 import qualified Kitten.Type as Type
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as Text
@@ -338,9 +339,11 @@ functionReference varInstantiations funcName inArity outArity
     where
     templateArgs :: [(TemplateVar, TemplateArgument)]
     templateArgs
-      = map (\ (typeName, rowType)
-        -> (RowParam typeName, RowArg (Type.rowDepth rowType)))
-      . Map.toList . Typed.instantiationMap
+      = map (\ (typeName, rowType) ->
+          ( RowParam (Type.TypeName typeName)
+          , RowArg (Type.rowDepth rowType)
+          ))
+      . NameMap.toList . Typed.instantiationNameMap
       $ Typed.rowInstantiations varInstantiations
 
 termToSSA :: Typed -> FunctionWriter ()
