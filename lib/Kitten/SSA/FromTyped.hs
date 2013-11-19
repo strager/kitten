@@ -13,7 +13,7 @@ import Debug.Trace
 
 import Control.Applicative
 import Control.Arrow (first)
-import Control.Monad (forM, liftM, unless)
+import Control.Monad (liftM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader hiding (local)
 import Control.Monad.Trans.State
@@ -41,9 +41,11 @@ import qualified Kitten.NameMap as NameMap
 import qualified Kitten.Type as Type
 import qualified Kitten.Typed as Typed
 import qualified Kitten.Util.Text as Text
+import qualified Kitten.Util.Vector as V
 
 data GlobalEnv = GlobalEnv
   { envDefs :: !(Vector TypedDef)
+  , envFunctions :: !(Vector (FunctionInfo Template))
   }
 
 data FunctionEnv = FunctionEnv
@@ -81,16 +83,18 @@ fragmentToSSA
   :: Fragment Typed
   -> (AFunction, [ADefinition])
 fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
-  = flip runReader GlobalEnv { envDefs = fragmentDefs }
+  = flip runReader globalEnv
   . flip evalStateT UnknownLocation $ do
     fragmentSSA <- functionToSSA
       (V.head fragmentTerms)  -- FIXME(strager)
+      fragmentFunctionInfo
       UnknownLocation  -- FIXME(strager)
-    definitionSSAs <- forM (V.toList fragmentDefs) $ \def -> do
+    definitionSSAs <- V.iforM fragmentDefs $ \index def -> do
+      funcInfo <- lookUpFunctionInfo (Name index)
       let
         loc = defLocation def
         term = Type.unScheme (defTerm def)
-      ssa <- functionToSSA term loc
+      ssa <- functionToSSA term funcInfo loc
       let name = GlobalFunctionName (defName def)
       return $ case ssa of
         NormalFunction f -> NormalDefinition Definition
@@ -101,12 +105,51 @@ fragmentToSSA Fragment{fragmentDefs, fragmentTerms}
           { definitionName = name
           , definitionFunction = f
           }
-    return (fragmentSSA, definitionSSAs)
+    return (fragmentSSA, V.toList definitionSSAs)
+  where
+  globalEnv = GlobalEnv
+    { envDefs = fragmentDefs
+    , envFunctions = V.map defFunctionInfo fragmentDefs
+    }
+  -- FIXME(strager)
+  fragmentFunctionInfo = FunctionInfo
+    { funcInputs = ScalarArity 0
+    , funcOutputs = ScalarArity 0
+    , funcTemplateParameters = NoParameters
+    , funcLocation = UnknownLocation
+    }
+
+functionInfo
+  :: Type Type.Scalar
+  -> Location
+  -> FunctionInfo Template
+functionInfo type_ loc = FunctionInfo
+  { funcInputs = inputArity
+  , funcOutputs = outputArity
+  , funcTemplateParameters
+    = Parameters $ functionTemplateParameters type_
+  , funcLocation = loc
+  }
+  where
+  inputArity, outputArity :: RowArity Template
+  (inputArity, outputArity) = functionRowArity type_
+
+defFunctionInfo
+  :: TypedDef
+  -> FunctionInfo Template
+defFunctionInfo def = functionInfo
+  (Typed.typedType (Type.unScheme (defTerm def)))
+  (defLocation def)
 
 lookUpFunction :: Name -> GlobalState TypedDef
 lookUpFunction name = do
   defs <- lift $ asks envDefs
   return $ defs V.! nameIndex name
+
+lookUpFunctionInfo :: Name -> GlobalState (FunctionInfo Template)
+lookUpFunctionInfo name = do
+  infos <- lift $ asks envFunctions
+  return $ infos V.! nameIndex name
 
 failure :: String -> GlobalState a
 failure message = do
@@ -189,32 +232,21 @@ pushLocalVar var = modify $ \env -> env
 -- | Converts a function and its closures to SSA form.
 functionToSSA
   :: Typed
+  -> FunctionInfo Template
   -> Location
   -> GlobalState AFunction
-functionToSSA term loc = do
+functionToSSA term info _loc{-FIXME(strager)-} = do
   (instructions, env)
     <- flip runStateT defaultFunctionEnv
     . execWriterT $ do
-      (inputArity, outputArity) <- liftState
-        $ functionRowArity (Typed.typedType term)
-      functionPrelude inputArity
+      functionPrelude (funcInputs info)
       termToSSA term
-      functionEpilogue outputArity
-
-  -- HACK(strager)
-  let
-    inputs = ScalarArity (envInferredInputArity env)
-    outputs = ScalarArity (envInferredOutputArity env)
+      functionEpilogue (funcOutputs info)
 
   return $ simplifyFunctionForm Function
     { funcInstructions = instructions
     , funcClosures = envClosures env
-    , funcInfo = FunctionInfo
-      { funcInputs = inputs
-      , funcOutputs = outputs
-      , funcTemplateParameters = Parameters (functionTemplateParameters (Typed.typedType term))
-      , funcLocation = loc
-      }
+    , funcInfo = info
     }
 
 simplifyFunctionForm :: Function Template -> AFunction
@@ -338,16 +370,17 @@ functionTemplateParameters type_ = doScalar type_ Set.empty
 -- (but it isn't).
 functionRowArity
   :: Type Type.Scalar
-  -> FunctionState (RowArity Template, RowArity Template)
+  -> (RowArity Template, RowArity Template)
 functionRowArity = \case
   Type.Function r s _effect _loc
-    | rBottommost == sBottommost
-    -> return (ScalarArity (Type.rowDepth r), ScalarArity (Type.rowDepth s))
-    | otherwise -> do
-      return
-        ( TemplateArity (RowParam (rowVar rBottommost)) (Type.rowDepth r)
-        , TemplateArity (RowParam (rowVar sBottommost)) (Type.rowDepth s)
-        )
+    | rBottommost == sBottommost ->
+      ( ScalarArity (Type.rowDepth r)
+      , ScalarArity (Type.rowDepth s)
+      )
+    | otherwise ->
+      ( TemplateArity (RowParam (rowVar rBottommost)) (Type.rowDepth r)
+      , TemplateArity (RowParam (rowVar sBottommost)) (Type.rowDepth s)
+      )
     where
     rBottommost, sBottommost :: Type Type.Row
     rBottommost = Type.bottommost r
@@ -361,9 +394,22 @@ functionRowArity = \case
 
 functionReference
   :: Typed.VarInstantiations
+  -> FunctionInfo form
   -> GlobalFunctionName
   -> FunctionRef Template
-functionReference varInstantiations funcName
+functionReference varInstantiations funcInfo funcName
+  = case funcTemplateParameters funcInfo of
+    NoParameters -> NormalRef funcName
+    Parameters parameters
+      | Set.null parameters -> NormalRef funcName
+      | otherwise -> templateFunctionReference
+        varInstantiations funcName
+
+templateFunctionReference
+  :: Typed.VarInstantiations
+  -> GlobalFunctionName
+  -> FunctionRef Template
+templateFunctionReference varInstantiations funcName
   = TemplateRef funcName templateArgs
   where
   templateArgs :: TemplateArguments Template
@@ -399,10 +445,12 @@ termToSSA theTerm = setLocation UnknownLocation{- FIXME -} >> case theTerm of
     -}
     let type_ = _type
 
+    fnInfo <- liftGlobalState $ lookUpFunctionInfo name
+
     traceShow type_ (return())
-    (inArity, outArity) <- liftState $ functionRowArity type_
+    let (inArity, outArity) = functionRowArity type_
     let funcName = GlobalFunctionName (defName fn)
-    let funcRef = functionReference varInstantiations funcName
+    let funcRef = functionReference varInstantiations fnInfo funcName
     inputs <- liftState $ popRow inArity
     outputs <- liftState $ pushRow outArity
     tellInstruction $ Call funcRef inputs outputs loc
@@ -530,12 +578,13 @@ builtinToSSA theBuiltin loc type_ = do
     -> (FunctionState (RowVar Template -> RowVar Template -> a))
     -> FunctionState a
   -- TODO(strager): Use _argsToDrop.
-  rowPolymorphic _argsToDrop constructor = do
-    (inputs, outputs) <- case type_ of
+  rowPolymorphic _argsToDrop constructor
+    = constructor <*> popRow inputs <*> pushRow outputs
+    where
+    (inputs, outputs) = case type_ of
       Type.Function (_ Type.:. functionType) _rhs _effect _loc
         -> functionRowArity functionType
       _ -> err $ "failed to find function argument for builtin " ++ show theBuiltin ++ " in type " ++ show type_
-    constructor <*> popRow inputs <*> pushRow outputs
 
   err :: String -> a
   err m = error $ "Kitten.SSA.builtinToSSA: " ++ m
@@ -561,7 +610,8 @@ valueToSSA theValue loc = case theValue of
     closedVars <- V.forM closedNames $ \closed -> case closed of
       ClosedName name -> liftState $ getLocal name
       ReclosedName name -> return $ Var (nameIndex name) Closed
-    func <- liftGlobalState $ functionToSSA term loc
+    func <- liftGlobalState $ functionToSSA term
+      (functionInfo (Typed.typedType term) loc) loc
     let
       closure = Closure
         { closureClosed = V.length closedVars
