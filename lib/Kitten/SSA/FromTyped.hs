@@ -54,11 +54,6 @@ data FunctionEnv = FunctionEnv
   , envDataStack :: ![Var Template]
   , envLocalIndex :: !Int
   , envLocalStack :: ![Var Normal]
-
-  -- HACK(strager)
-  , envParameterIndex :: !Int
-  , envInferredInputArity :: !Int
-  , envInferredOutputArity :: !Int
   }
 
 defaultFunctionEnv :: FunctionEnv
@@ -68,10 +63,6 @@ defaultFunctionEnv = FunctionEnv
   , envDataStack = []
   , envLocalIndex = 0
   , envLocalStack = []
-
-  , envParameterIndex = 0
-  , envInferredInputArity = 0
-  , envInferredOutputArity = 0
   }
 
 type GlobalState = StateT Location (Reader GlobalEnv)
@@ -180,18 +171,7 @@ pop = do
     (x:xs) -> do
       put env { envDataStack = xs }
       return x
-    -- FIXME(strager): Instead of popping locals here, this
-    -- should be an error, and locals should be pushed in a
-    -- function prelude.  However, we don't have type
-    -- information for closures, so we don't know how many
-    -- things to pop off the stack.
-    [] -> {-lift $ failure "Popping empty stack"-} do
-      let param = envParameterIndex env
-      put env
-        { envParameterIndex = param + 1
-        , envInferredInputArity = envInferredInputArity env + 1
-        }
-      return (Var param Parameter)
+    [] -> lift $ failure "Popping empty stack"
 
 freshVarIndex :: FunctionState Int
 freshVarIndex = do
