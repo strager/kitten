@@ -29,16 +29,22 @@ instance Instantiate Function where
     -- TODO(strager): Assert that funcTemplateParameters
     -- matches the instantiate context.
 
-    inputs <- instantiate funcInputs
-    outputs <- instantiate funcOutputs
+    info <- instantiate funcInfo
     instructions <- V.mapM instantiate funcInstructions
     let closures = V.empty  -- TODO(strager)
-
     return Function
+      { funcInstructions = instructions
+      , funcClosures = closures
+      , funcInfo = info
+      }
+
+instance Instantiate FunctionInfo where
+  instantiate FunctionInfo{..} = do
+    inputs <- instantiate funcInputs
+    outputs <- instantiate funcOutputs
+    return FunctionInfo
       { funcInputs = inputs
       , funcOutputs = outputs
-      , funcInstructions = instructions
-      , funcClosures = closures
       , funcTemplateParameters = NoParameters
       , funcLocation = funcLocation
       }

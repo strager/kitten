@@ -207,22 +207,21 @@ functionToSSA term loc = do
     outputs = ScalarArity (envInferredOutputArity env)
 
   return $ simplifyFunctionForm Function
-    { funcInputs = inputs
-    , funcOutputs = outputs
-    , funcInstructions = instructions
+    { funcInstructions = instructions
     , funcClosures = envClosures env
-    , funcTemplateParameters = Parameters (functionTemplateParameters (Typed.typedType term))
-    , funcLocation = loc
+    , funcInfo = FunctionInfo
+      { funcInputs = inputs
+      , funcOutputs = outputs
+      , funcTemplateParameters = Parameters (functionTemplateParameters (Typed.typedType term))
+      , funcLocation = loc
+      }
     }
 
 simplifyFunctionForm :: Function Template -> AFunction
-simplifyFunctionForm function@Function{..}
-  = case funcTemplateParameters of
-    Parameters parameters | Set.null parameters
-      -> case downcast function of
-        Nothing -> error "No parameters for template function"
-        Just f -> NormalFunction f
-    _ -> TemplateFunction function
+simplifyFunctionForm function
+  = case downcast function of
+    Nothing -> TemplateFunction function
+    Just f -> NormalFunction f
 
 functionPrelude :: RowArity form -> FunctionWriter ()
 functionPrelude arity = case arity of

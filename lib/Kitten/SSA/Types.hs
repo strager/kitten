@@ -18,6 +18,7 @@ module Kitten.SSA.Types
   , Downcast(..)
   , Form(..)
   , Function(..)
+  , FunctionInfo(..)
   , FunctionRef(..)
   , GlobalFunctionName(..)
   , Instruction(..)
@@ -77,18 +78,9 @@ instance ToText AFunction where
 
 data Function (form :: Form) where
   Function ::
-    { funcInputs :: !(RowArity form)
-    , funcOutputs :: !(RowArity form)
-    , funcInstructions :: !(Vector (Instruction form))
-
+    { funcInstructions :: !(Vector (Instruction form))
     , funcClosures :: !(Vector Closure)
-    -- ^ Closures available only to this function.
-
-    , funcTemplateParameters :: TemplateParameters form
-    -- ^ Template parameters, if this function is a
-    -- template.
-
-    , funcLocation :: !Location
+    , funcInfo :: !(FunctionInfo form)
     } -> Function form
 
 instance Show (Function form) where
@@ -120,6 +112,20 @@ functionToText name Function{..} = Text.unlines
       (toText (ClosureName index)) (closureFunction closure))
     funcClosures
   ]
+  where
+  FunctionInfo{..} = funcInfo
+
+data FunctionInfo (form :: Form) where
+  FunctionInfo ::
+    { funcInputs :: !(RowArity form)
+    , funcOutputs :: !(RowArity form)
+
+    , funcTemplateParameters :: !(TemplateParameters form)
+    -- ^ Template parameters, if this function is a
+    -- template.
+
+    , funcLocation :: !Location
+    } -> FunctionInfo form
 
 data ADefinition
   = NormalDefinition !(Definition Normal)
@@ -560,7 +566,7 @@ instance ToText TemplateVar where
   toText (RowParam var) = "row(" <> toText var <> ")"
 
 data TemplateParameters (form :: Form) where
-  NoParameters :: TemplateParameters Normal
+  NoParameters :: TemplateParameters form
   Parameters
     -- TODO(strager): Disallow empty set!
     :: !(Set TemplateVar)
@@ -638,19 +644,35 @@ instance Downcast RowArity Template Normal where
 
 instance Downcast Function Template Normal where
   downcast Function{..} = do
-    inputs <- downcast funcInputs
-    outputs <- downcast funcOutputs
+    info <- downcast funcInfo
     instructions <- V.mapM downcast funcInstructions
     -- NOTE(strager): GHC does not support type-changing
     -- GADT record updates.
     return Function
+      { funcInstructions = instructions
+      , funcClosures = funcClosures
+      , funcInfo = info
+      }
+
+instance Downcast FunctionInfo Template Normal where
+  downcast FunctionInfo{..} = do
+    inputs <- downcast funcInputs
+    outputs <- downcast funcOutputs
+    templateParameters <- downcast funcTemplateParameters
+    -- NOTE(strager): GHC does not support type-changing
+    -- GADT record updates.
+    return FunctionInfo
       { funcInputs = inputs
       , funcOutputs = outputs
-      , funcInstructions = instructions
-      , funcClosures = funcClosures
-      , funcTemplateParameters = NoParameters
+      , funcTemplateParameters = templateParameters
       , funcLocation = funcLocation
       }
+
+instance Downcast TemplateParameters Template Normal where
+  downcast NoParameters = Just NoParameters
+  downcast (Parameters parameters)
+    | Set.null parameters = Just NoParameters
+    | otherwise = Nothing
 
 instance Downcast Var Template Normal where
   downcast (Var index varType)

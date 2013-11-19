@@ -220,7 +220,7 @@ ssaFunctionToC' func globalName closureNames funcPrelude
   where
   this :: Text
   this = Text.concat
-    [ locationComment (SSA.funcLocation func), "\n"
+    [ locationComment (SSA.funcLocation (SSA.funcInfo func)), "\n"
     , functionSignatureToC func globalName closureNames
     , " {\n"
     , Text.indent (funcPrelude <> body)
@@ -285,7 +285,7 @@ functionSignatureToC
   -> [SSA.ClosureName]
   -> Text
 functionSignatureToC SSA.Function{..} globalName closureNames
-  = signature (typeOfRowArity funcOutputs)
+  = signature (typeOfRowArity (SSA.funcOutputs funcInfo))
     (mangle $ FunctionName (SSA.NormalRef globalName) closureNames)
     $ case closureNames of
       [] -> formalParameters
@@ -293,7 +293,7 @@ functionSignatureToC SSA.Function{..} globalName closureNames
         : formalParameters
   where
   formalParameters :: [Text]
-  formalParameters = reverse . unfoldToN (scalarArity funcInputs)
+  formalParameters = reverse . unfoldToN (scalarArity (SSA.funcInputs funcInfo))
     $ \index -> typed Value (SSA.Var index SSA.Parameter)
 
 ssaFunctionToCProto
