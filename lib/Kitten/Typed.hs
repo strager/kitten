@@ -104,21 +104,20 @@ instance (ToText (Type a)) => ToText (VarKindInstantiations a) where
 data VarInstantiations = VarInstantiations
   (VarKindInstantiations Row)
   (VarKindInstantiations Scalar)
-  (VarKindInstantiations Effect)
   deriving (Eq)
 
 instance Monoid VarInstantiations where
-  mempty = VarInstantiations mempty mempty mempty
-  VarInstantiations r s e `mappend` VarInstantiations r' s' e'
-    = VarInstantiations (r <> r') (s <> s') (e <> e')
+  mempty = VarInstantiations mempty mempty
+  VarInstantiations r s `mappend` VarInstantiations r' s'
+    = VarInstantiations (r <> r') (s <> s')
 
 instance Show VarInstantiations where
   show = Text.unpack . toText
 
 instance ToText VarInstantiations where
-  toText (VarInstantiations rows scalars effects)
+  toText (VarInstantiations rows scalars)
     = Text.intercalate ", "
-      [toText rows, toText scalars, toText effects]
+      [toText rows, toText scalars]
 
 defTypeScheme :: TypedDef -> TypeScheme
 defTypeScheme def = type_ <$ defTerm def
@@ -127,7 +126,7 @@ defTypeScheme def = type_ <$ defTerm def
 
 rowInstantiations
   :: VarInstantiations -> VarKindInstantiations Row
-rowInstantiations (VarInstantiations rows _ _) = rows
+rowInstantiations (VarInstantiations rows _) = rows
 
 typedType :: Typed -> Type Scalar
 typedType typed = case typed of

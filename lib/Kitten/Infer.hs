@@ -391,10 +391,10 @@ infer finalEnv resolved = case resolved of
       $ instantiateM =<< declOrDef
     let
       type_ = instantiatedType instantiation
-      Typed.VarInstantiations rows scalars effects
+      Typed.VarInstantiations rows scalars
         = varInstantiations instantiation
       insts = Typed.VarInstantiations
-        (subs rows) (subs scalars) (subs effects)
+        (subs rows) (subs scalars)
     return (Typed.Call name loc insts (sub finalEnv type_), type_)
     where
     declOrDef = do

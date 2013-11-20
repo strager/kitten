@@ -307,13 +307,13 @@ functionTemplateParameters type_ = doScalar type_ Set.empty
 
   doScalar :: Type Type.Scalar -> Set TemplateVar -> Set TemplateVar
   doScalar = \case
-    a Type.:& b           -> doScalar a . doScalar b
-    (Type.:?) a           -> doScalar a
-    a Type.:| b           -> doScalar a . doScalar b
-    Type.Bool{}           -> id
-    Type.Char{}           -> id
-    Type.Float{}          -> id
-    Type.Function a b e _ -> doRow a . doRow b . doEffect e
+    a Type.:& b -> doScalar a . doScalar b
+    (Type.:?) a -> doScalar a
+    a Type.:| b -> doScalar a . doScalar b
+    Type.Bool{} -> id
+    Type.Char{} -> id
+    Type.Float{} -> id
+    Type.Function a b _ -> doRow a . doRow b
       . if aBottommost == bBottommost
         then id
         else insertRowParam aBottommost . insertRowParam bBottommost
@@ -326,19 +326,12 @@ functionTemplateParameters type_ = doScalar type_ Set.empty
         -> Set TemplateVar
         -> Set TemplateVar
       insertRowParam = maybe id (Set.insert . RowParam)
-    Type.Handle{}         -> id
-    Type.Int{}            -> id
-    Type.Named{}          -> id
-    Type.Unit{}           -> id
-    Type.Var{}            -> id
-    Type.Vector a _       -> doScalar a
-
-  doEffect :: Type Type.Effect -> Set TemplateVar -> Set TemplateVar
-  doEffect = \case
-    a Type.:+ b           -> doEffect a . doEffect b
-    Type.Var{}            -> id
-    Type.NoEffect{}       -> id
-    Type.IOEffect{}       -> id
+    Type.Handle{} -> id
+    Type.Int{} -> id
+    Type.Named{} -> id
+    Type.Unit{} -> id
+    Type.Var{} -> id
+    Type.Vector a _ -> doScalar a
 
 -- | Returns the number of values consumed and returned by a
 -- function with the given type.
@@ -352,7 +345,7 @@ functionRowArity
   :: Type Type.Scalar
   -> (RowArity Template, RowArity Template)
 functionRowArity = \case
-  Type.Function r s _effect _loc
+  Type.Function r s _loc
     | rBottommost == sBottommost ->
       ( ScalarArity (Type.rowDepth r)
       , ScalarArity (Type.rowDepth s)
@@ -562,7 +555,7 @@ builtinToSSA theBuiltin loc type_ = do
     = constructor <*> popRow inputs <*> pushRow outputs
     where
     (inputs, outputs) = case type_ of
-      Type.Function (_ Type.:. functionType) _rhs _effect _loc
+      Type.Function (_ Type.:. functionType) _rhs _loc
         -> functionRowArity functionType
       _ -> err $ "failed to find function argument for builtin " ++ show theBuiltin ++ " in type " ++ show type_
 

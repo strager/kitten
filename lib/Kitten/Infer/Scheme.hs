@@ -83,17 +83,16 @@ instantiate origin scheme env = (instantiation, env')
     return . VarKindInstantiations
       $ N.singleton (unTypeName name) var
 
-  Forall rows scalars effects tidied = runTidy
+  Forall rows scalars tidied = runTidy
     $ tidyScheme tidyScalarType scheme
 
 -- | Creates an inference environment with the given
 -- unifications applied.
 varInstantiationsEnv :: VarInstantiations -> Env
-varInstantiationsEnv (VarInstantiations rows scalars effects)
+varInstantiationsEnv (VarInstantiations rows scalars)
   = emptyEnv
   { envRows = instantiationNameMap rows
   , envScalars = instantiationNameMap scalars
-  , envEffects = instantiationNameMap effects
   }
 
 generalize :: Type Scalar -> Inferred TypeScheme
